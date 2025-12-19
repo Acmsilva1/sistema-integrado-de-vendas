@@ -1,213 +1,193 @@
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import gspread
 import os
-import gspread # NOVO: Biblioteca para Google Sheets
-import json
-import sys # Para interrupção controlada
+import plotly.express as px
+from datetime import datetime
+from io import StringIO
+import locale
 
-# --- REMOVIDAS FUNÇÕES ESPECÍFICAS DO GOOGLE COLAB ---
-# from google.colab import files
-# from IPython.display import HTML, display
-
-# --- CONFIGURAÇÃO GOOGLE SHEETS E ARQUIVOS ---
-# 🚨 IMPORTANTE: Substitua estes placeholders pelos dados da sua planilha!
-SPREADSHEET_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug" 
-WORKSHEET_NAME = "vendas" 
-
-# A credencial é lida de forma segura da variável de ambiente (GitHub Secret)
-SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS') 
-
-html_filename = 'dashboard_vendas_final.html'
-
-# 1. Função de Tratamento de Valores Monetários (Preservada)
-def parse_brl_value(value):
-    """Converte strings BRL (R$ 1.234,56) para float."""
-    try:
-        # Lógica original: remove R$, remove pontos de milhar, troca vírgula por ponto
-        cleaned_value = str(value).replace('R$', '').strip().replace('.', '').replace(',', '.')
-        return float(cleaned_value)
-    except:
-        return None
-
-# 2. Conexão ao Google Sheets e Leitura dos Dados
+# Configuração de localização para formatação monetária (Ajuste se necessário)
+# Tenta configurar para pt_BR.UTF-8, se falhar, tenta pt_BR
 try:
-    if not SHEET_CREDENTIALS_JSON:
-        print("🚨 ERRO: Variável de ambiente GCP_SA_CREDENTIALS não encontrada.")
-        print("Certifique-se de configurar o Secret no GitHub.")
-        sys.exit(1) # Sai com erro
-        
-    print(f"Conectando ao Google Sheet ID: {SPREADSHEET_ID} na aba '{WORKSHEET_NAME}'...")
-    
-    # 2.1. Autenticação usando as credenciais do Secret do GitHub
-    creds_dict = json.loads(SHEET_CREDENTIALS_JSON)
-    gc = gspread.service_account_from_dict(creds_dict)
-    
-    # 2.2. Abrir a planilha e a aba
+    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+except locale.Error:
+    try:
+        locale.setlocale(locale.LC_ALL, 'pt_BR')
+    except locale.Error:
+        print("Aviso: Configuração de locale pt_BR falhou. Usando formato padrão.")
+
+# --- 1. CONFIGURAÇÕES E AUTENTICAÇÃO ---
+try:
+    SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
+    gc = gspread.service_account_from_dict(pd.read_json(StringIO(SHEET_CREDENTIALS_JSON)))
+except Exception as e:
+    # Caso esteja rodando localmente (necessário ter o arquivo de credenciais)
+    print("ERRO ao carregar credenciais do ambiente. Tentando credenciais locais...")
+    # NOTE: Para rodar localmente, você deve ter seu 'service_account.json' no diretório.
+    gc = gspread.service_account()
+
+SPREADSHEET_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"
+WORKSHEET_NAME = "vendas"
+
+# --- 2. FUNÇÃO DE CARREGAMENTO E LIMPEZA DE DADOS ---
+def carregar_e_limpar_dados():
     sh = gc.open_by_key(SPREADSHEET_ID)
     worksheet = sh.worksheet(WORKSHEET_NAME)
+    data = worksheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    # Limpeza da Coluna 'Total Venda' e conversão para float
+    df['Total Venda'] = (
+        df['Total Venda']
+        .astype(str)
+        .str.replace('R$', '', regex=False)
+        .str.replace('.', '', regex=False)
+        .str.replace(',', '.', regex=False)
+        .str.strip()
+    )
+    df['Total Venda'] = pd.to_numeric(df['Total Venda'], errors='coerce')
+    df.dropna(subset=['Total Venda'], inplace=True)
+
+    # Conversão da Coluna de Data/Hora
+    df['Data/Hora Venda'] = pd.to_datetime(df['Data/Hora Venda'], errors='coerce')
+    df.dropna(subset=['Data/Hora Venda'], inplace=True)
+    df['Hora'] = df['Data/Hora Venda'].dt.hour
+
+    return df
+
+# --- 3. ANÁLISES E MONTAGEM DO HTML ---
+def criar_dashboard_html(df):
+    # --- 3.1. CÁLCULOS DOS KPIS ---
+    total_vendas = df['Total Venda'].sum()
+    sabor_mais_vendido = df['Item'].mode()[0]
     
-    # 2.3. Obter todos os dados como lista de listas (A primeira linha é o header)
-    data = worksheet.get_all_values()
+    melhor_cliente_df = df.groupby('Cliente')['Total Venda'].sum().sort_values(ascending=False)
+    melhor_cliente = melhor_cliente_df.index[0]
+    melhor_cliente_gasto = melhor_cliente_df.iloc[0]
     
-    # 2.4. Converter para DataFrame Pandas 
-    # Assume a primeira linha como cabeçalho (data[0]) e o restante como dados (data[1:])
-    df = pd.DataFrame(data[1:], columns=data[0])
+    pico_hora_df = df['Hora'].value_counts()
+    pico_hora = pico_hora_df.index[0]
     
-    print(f"✅ Dados lidos com sucesso! Total de {len(df)} linhas brutas.")
+    # Formatação de Moeda
+    total_vendas_fmt = locale.currency(total_vendas, grouping=True)
+    melhor_cliente_gasto_fmt = locale.currency(melhor_cliente_gasto, grouping=True)
 
-    # 3. Limpeza e Pré-processamento dos Dados
-    # Certifique-se de que os nomes de colunas 'DATA E HORA', 'VALOR DA VENDA' e 'SABORES' 
-    # no seu Google Sheet são EXATAMENTE IGUAIS aos usados aqui.
-    df['Data_Venda'] = pd.to_datetime(df['DATA E HORA'], format='%d/%m/%y %H:%M', errors='coerce')
-    df['Valor_Venda'] = df['VALOR DA VENDA'].apply(parse_brl_value)
-    df = df.dropna(subset=['Data_Venda', 'Valor_Venda'])
+    # --- 3.2. VISUALIZAÇÕES COM PLOTLY ---
     
-    if df.empty:
-        print("🚨 ERRO: Não há dados válidos após a limpeza. Verifique as colunas e formatos.")
-        sys.exit(1)
+    # Gráfico 1: Vendas por Sabor/Item
+    vendas_por_item = df['Item'].value_counts().reset_index()
+    vendas_por_item.columns = ['Item', 'Contagem']
+    fig_sabor = px.bar(
+        vendas_por_item.head(10).sort_values(by='Contagem'), 
+        x='Contagem', y='Item', 
+        orientation='h', 
+        title='Top 10 Sabores/Itens Mais Vendidos (Contagem)',
+        template='plotly_dark'
+    )
+    fig_sabor.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
 
-    print(f"✅ Limpeza de dados concluída! {len(df)} registros válidos.")
+    # Gráfico 2: Pico de Vendas por Hora do Dia
+    fig_hora = px.bar(
+        pico_hora_df.reset_index(), 
+        x='Hora', y='count', 
+        title='Frequência de Vendas por Hora (Pico: ' + str(pico_hora) + 'h)',
+        template='plotly_dark'
+    )
+    fig_hora.update_xaxes(tick0=0, dtick=1)
+    fig_hora.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
+    
+    # Gráfico 3: Melhores Clientes por Gasto Total
+    fig_cliente = px.bar(
+        melhor_cliente_df.head(5).reset_index().rename(columns={'Total Venda': 'Gasto Total'}), 
+        x='Cliente', y='Gasto Total', 
+        title='Top 5 Clientes por Gasto Total',
+        template='plotly_dark'
+    )
+    fig_cliente.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
 
-except Exception as e:
-    print(f"🚨 ERRO crítico ao ler o Google Sheet ou processar: {e}")
-    sys.exit(1)
+    # --- 3.3. MONTAGEM FINAL DO HTML COM LAYOUT RESPONSIVO ---
+    
+    # Estilos CSS Inclusos para Responsividade (Flexbox)
+    styles = """
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #1e1e1e; color: white; margin: 0; padding: 10px; }
+        .kpi-container { display: flex; flex-wrap: wrap; justify-content: space-around; background-color: #2e2e2e; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        .kpi-box { text-align: center; padding: 10px; min-width: 200px; flex: 1; margin: 5px; }
+        .kpi-box h2 { font-size: 1.1em; margin-bottom: 5px; }
+        .kpi-box p { font-size: 1.6em; font-weight: bold; margin-top: 5px; }
+        .chart-container { display: flex; flex-wrap: wrap; justify-content: space-between; }
+        .chart-item { width: 100%; margin-bottom: 20px; } /* 100% no mobile */
+        @media (min-width: 768px) {
+            .chart-item { width: 48%; } /* 48% em telas maiores (desktop) */
+        }
+    </style>
+    """
 
+    kpi_html = f"""
+    <div class="kpi-container">
+        <div class="kpi-box">
+            <h2 style="color: #64ffda;">Total Arrecadado</h2>
+            <p style="color: #64ffda;">{total_vendas_fmt}</p>
+        </div>
+        <div class="kpi-box">
+            <h2 style="color: #2196F3;">Sabor Campeão</h2>
+            <p style="color: #2196F3;">{sabor_mais_vendido}</p>
+        </div>
+        <div class="kpi-box">
+            <h2 style="color: #FF9800;">Pico de Vendas</h2>
+            <p style="color: #FF9800;">{pico_hora}h</p>
+        </div>
+        <div class="kpi-box">
+            <h2 style="color: #E91E63;">Melhor Cliente</h2>
+            <p style="color: #E91E63;">{melhor_cliente} ({melhor_cliente_gasto_fmt})</p>
+        </div>
+    </div>
+    """
 
-# --- 4. CÁLCULO DAS MÉTRICAS DE ANÁLISE (CÓDIGO ORIGINAL PRESERVADO) ---
-df['Mês_Ano'] = df['Data_Venda'].dt.to_period('M').astype(str)
-vendas_mensais = df.groupby('Mês_Ano')['Valor_Venda'].agg(
-    Total_Vendas='sum',
-    Ticket_Medio='mean',
-    Num_Vendas='count'
-).reset_index()
+    # Combina tudo no HTML final
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Dashboard Detalhado de Vendas</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+        {styles}
+    </head>
+    <body>
+        <h1 style="text-align: center; color: #64ffda;">Dashboard Detalhado de Vendas</h1>
+        <p style="text-align: center; color: #aaa;">Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+        
+        {kpi_html}
+        
+        <div class="chart-container">
+            <div class="chart-item">
+                {fig_sabor.to_html(full_html=False, include_plotlyjs='cdn')}
+            </div>
+            <div class="chart-item">
+                {fig_hora.to_html(full_html=False, include_plotlyjs='cdn')}
+            </div>
+             <div class="chart-item" style="width: 100%;">
+                {fig_cliente.to_html(full_html=False, include_plotlyjs='cdn')}
+            </div>
+        </div>
+        
+    </body>
+    </html>
+    """
+    
+    return html_content
 
-vendas_mensais['Data_Ordenacao'] = pd.to_datetime(vendas_mensais['Mês_Ano'])
-vendas_mensais = vendas_mensais.sort_values(by='Data_Ordenacao').drop(columns=['Data_Ordenacao'])
+# --- 4. EXECUÇÃO PRINCIPAL ---
+if __name__ == "__main__":
+    try:
+        df_vendas = carregar_e_limpar_dados()
+        final_html = criar_dashboard_html(df_vendas)
 
-# Aqui, assume-se que a coluna 'SABORES' está correta e existe
-# ATENÇÃO: Se SABORES for a coluna, ela deve estar no seu Sheets
-if 'SABORES' in df.columns:
-    vendas_por_sabor = df.groupby('SABORES')['Valor_Venda'].sum().nlargest(5).reset_index()
-    vendas_por_sabor.rename(columns={'Valor_Venda': 'Receita_Total'}, inplace=True)
-else:
-    print("⚠️ Aviso: Coluna 'SABORES' não encontrada. O gráfico de Top Produtos não será gerado corretamente.")
-    vendas_por_sabor = pd.DataFrame({'SABORES': ['N/A'], 'Receita_Total': [0]})
+        with open("dashboard_vendas_final.html", "w") as f:
+            f.write(final_html)
 
+        print("Dashboard HTML detalhado e otimizado para responsividade (via CSS) foi gerado com sucesso.")
 
-# Geração dos KPIs (Dados do Resumo)
-media_geral_vendas = vendas_mensais['Total_Vendas'].mean()
-total_geral = vendas_mensais['Total_Vendas'].sum()
-melhor_mes = vendas_mensais.loc[vendas_mensais['Total_Vendas'].idxmax()]
-melhor_ticket = vendas_mensais.loc[vendas_mensais['Ticket_Medio'].idxmax()]
-top_produto = vendas_por_sabor.iloc[0]
-
-# Criação do DataFrame para a Tabela de Resumo
-df_kpis = pd.DataFrame({
-    'Métrica': [
-        'Total Geral de Vendas',
-        'Média Mensal de Faturamento',
-        'Melhor Mês de Vendas',
-        'Maior Ticket Médio',
-        'Produto Estrela (Top 1)'
-    ],
-    'Valor': [
-        f"R$ {total_geral:,.2f}",
-        f"R$ {media_geral_vendas:,.2f}",
-        f"R$ {melhor_mes['Total_Vendas']:,.2f} ({melhor_mes['Mês_Ano']})",
-        f"R$ {melhor_ticket['Ticket_Medio']:,.2f} ({melhor_ticket['Mês_Ano']})",
-        f"{top_produto['SABORES']} (R$ {top_produto['Receita_Total']:,.2f})"
-    ]
-})
-print("✅ KPIs para o resumo da tabela calculados!")
-
-
-# --- 5. CRIAÇÃO DO DASHBOARD PLOTLY (CÓDIGO ORIGINAL PRESERVADO) ---
-fig = make_subplots(
-    rows=4, cols=1,
-    shared_xaxes=False,
-    vertical_spacing=0.08,
-    subplot_titles=(
-        "📝 Resumo dos Principais Indicadores (KPIs)",
-        "💸 Comparativo de Vendas Totais por Mês (vs. Média Geral)",
-        "📈 Tendência do Ticket Médio Mensal (R$ por Venda)",
-        "🥇 Top 5 Produtos/Sabores por Receita"
-    ),
-    specs=[
-        [{"type": "domain"}],
-        [{"type": "xy"}],
-        [{"type": "xy"}],
-        [{"type": "xy"}]
-    ]
-)
-
-# --- Gráfico 1: Tabela de Resumo (go.Table) ---
-fig.add_trace(
-    go.Table(
-        header=dict(values=list(df_kpis.columns), fill_color='#333', align='left', font=dict(color='white', size=14)),
-        cells=dict(values=[df_kpis.Métrica, df_kpis.Valor], fill_color='#444', align='left', font=dict(color='white', size=12), height=30)
-    ),
-    row=1, col=1
-)
-
-# --- Gráfico 2: Vendas Totais por Mês (go.Bar) ---
-fig.add_trace(go.Bar(x=vendas_mensais['Mês_Ano'], y=vendas_mensais['Total_Vendas'], name='Vendas', marker_color='#FF8C00'), row=2, col=1)
-
-# Adiciona a linha da média geral e anotação
-fig.add_trace(
-    go.Scatter(
-        x=vendas_mensais['Mês_Ano'],
-        y=[media_geral_vendas] * len(vendas_mensais),
-        mode='lines',
-        name='Média Geral',
-        line=dict(color='red', dash='dash'),
-        hoverinfo='skip',
-        showlegend=False
-    ),
-    row=2, col=1
-)
-fig.add_annotation(
-    x=vendas_mensais['Mês_Ano'].iloc[-1],
-    y=media_geral_vendas,
-    text=f"Média Geral: R$ {media_geral_vendas:,.2f}",
-    showarrow=False,
-    yshift=10,
-    font=dict(color="red", size=10),
-    bgcolor="rgba(0,0,0,0.7)",
-    borderpad=4,
-    row=2, col=1
-)
-
-# --- Gráfico 3: Ticket Médio Mensal (go.Scatter) ---
-fig.add_trace(go.Scatter(x=vendas_mensais['Mês_Ano'], y=vendas_mensais['Ticket_Medio'], mode='lines+markers', name='Ticket Médio', line=dict(color='#1E90FF', width=3)), row=3, col=1)
-
-# --- Gráfico 4: Top 5 Sabores (go.Bar - Horizontal) ---
-fig.add_trace(go.Bar(x=vendas_por_sabor['Receita_Total'], y=vendas_por_sabor['SABORES'], orientation='h', name='Receita', marker_color='#3CB371'), row=4, col=1)
-
-
-# 6. Ajustes Finais de Layout e Exportação (CÓDIGO ORIGINAL PRESERVADO)
-fig.update_layout(
-    title_text=f"**DASHBOARD DE ANÁLISE DE VENDAS COMPLETA** | Fonte: Google Sheets",
-    height=1500,
-    template='plotly_dark',
-    showlegend=False,
-    hovermode="x unified"
-)
-
-# Configurações de Eixos
-fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1) 
-fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1) 
-
-fig.update_yaxes(tickformat=".2f", row=2, col=1, title_text="Total Vendas (R$)")
-fig.update_yaxes(tickformat=".2f", row=3, col=1, title_text="Ticket Médio (R$)")
-fig.update_xaxes(title_text="Mês de Venda", row=3, col=1) 
-
-fig.update_yaxes(title_text="Produto/Sabor", row=4, col=1)
-fig.update_xaxes(title_text="Receita Total (R$)", row=4, col=1)
-
-# Exportação do HTML
-# fig.write_html() salva o novo HTML no disco do GitHub Actions
-fig.write_html(html_filename, full_html=True, include_plotlyjs='cdn')
-
-print(f"\n✨ Dashboard interativo (Final) gerado! Salvo como: {html_filename}")
-print("🚀 Script finalizado. O arquivo HTML foi salvo e está pronto para ser versionado.")
+    except Exception as e:
+        print(f"Ocorreu um erro no script de automação: {e}")
+        exit(1)
