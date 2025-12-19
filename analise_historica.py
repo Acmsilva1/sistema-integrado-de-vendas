@@ -2,66 +2,86 @@ import gspread
 import pandas as pd
 from datetime import datetime
 import os
+import json # Necessário para carregar o secret JSON
 
 # --- Configurações ---
 ID_HISTORICO = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y"
 OUTPUT_HTML = "dashboard_historico.html"
+URL_DASHBOARD = "https://acmsilva1.github.io/analise-de-vendas/dashboard_historico.html"
+COLUNA_DATA = 'DATA E HORA'
+COLUNA_VALOR = 'VALOR DA VENDA'
+
+
+def autenticar_gspread():
+    """
+    Autentica o gspread usando o secret do ambiente (GCP_SA_CREDENTIALS) ou
+    o método local, garantindo consistência com o agente diário.
+    """
+    try:
+        # Tenta carregar o JSON de credenciais da variável de ambiente (CI/CD)
+        SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
+        
+        if SHEET_CREDENTIALS_JSON:
+            credentials_dict = json.loads(SHEET_CREDENTIALS_JSON) 
+            gc = gspread.service_account_from_dict(credentials_dict)
+            print("Autenticação via Váriavel de Ambiente (Secret) concluída.")
+            return gc
+        else:
+            # Caso não esteja no CI/CD, tenta o método local (credenciais.json)
+            gc = gspread.service_account(filename='credenciais.json')
+            print("Autenticação via arquivo local (credenciais.json) concluída.")
+            return gc
+
+    except Exception as e:
+        print(f"ERRO CRÍTICO de Autenticação/Credenciais: {e}")
+        raise ValueError("Falha na autenticação do Google Sheets. Verifique o secret ou o arquivo 'credenciais.json'.")
+
 
 def gerar_analise_historica():
+    total_vendas_global = 0 # Inicializado fora do try para o HTML de erro
+    
     try:
-        # 1. Autenticação e Leitura
-        gc = gspread.service_account(filename='credenciais.json')
+        # 1. Autenticação (Agora robusta!)
+        gc = autenticar_gspread()
         planilha_historico = gc.open_by_key(ID_HISTORICO).worksheet(0)
         
-        # Pega todos os dados (incluindo cabeçalho)
         dados = planilha_historico.get_all_values()
-        
-        # O cabeçalho é a primeira linha
         headers = dados[0]
         data = dados[1:]
 
-        # 2. Criação do DataFrame com Pandas
         df = pd.DataFrame(data, columns=headers)
         
-        # --- Mapeamento das Colunas Chave ---
-        COLUNA_DATA = 'DATA E HORA'
-        COLUNA_VALOR = 'VALOR DA VENDA'
+        # 2. Tratamento e Limpeza (Governança de Dados)
         
-        # 3. Tratamento e Limpeza
-        
-        # Converte a coluna de valor para numérico, tratando erros
-        # Substitui vírgulas por pontos, se necessário (padrão brasileiro)
-        df[COLUNA_VALOR] = df[COLUNA_VALOR].str.replace(',', '.', regex=True)
+        df[COLUNA_VALOR] = df[COLUNA_VALOR].astype(str).str.replace(',', '.', regex=True)
         df['Valor_Venda_Float'] = pd.to_numeric(df[COLUNA_VALOR], errors='coerce')
         
-        # Converte a coluna de Data para datetime
-        df['Data_Datetime'] = pd.to_datetime(df[COLUNA_DATA], errors='coerce')
+        # CORREÇÃO CRUCIAL DE GOVERNANÇA: dayfirst=True
+        df['Data_Datetime'] = pd.to_datetime(df[COLUNA_DATA], errors='coerce', dayfirst=True)
         
-        # Remove linhas com valores nulos nas colunas chave
         df.dropna(subset=['Data_Datetime', 'Valor_Venda_Float'], inplace=True)
         
-        # --- 4. ANÁLISE DE TENDÊNCIAS E VENDAS MENSAIS ---
+        # --- 3. ANÁLISE DE TENDÊNCIAS E VENDAS MENSAIS ---
 
-        # Cria uma coluna de Mês/Ano para agrupar
         df['Mes_Ano'] = df['Data_Datetime'].dt.to_period('M')
-        
-        # a) Vendas Mensais: Agrupa e soma
         vendas_mensais = df.groupby('Mes_Ano')['Valor_Venda_Float'].sum().reset_index()
         vendas_mensais['Mes_Ano'] = vendas_mensais['Mes_Ano'].astype(str) 
 
-        # b) Tendências (Variação Percentual Mês a Mês)
         vendas_mensais['Vendas_Anteriores'] = vendas_mensais['Valor_Venda_Float'].shift(1)
         vendas_mensais['Variacao_Mensal'] = (
             (vendas_mensais['Valor_Venda_Float'] - vendas_mensais['Vendas_Anteriores']) / vendas_mensais['Vendas_Anteriores']
         ) * 100
         
-        # c) Insights Simples (Último Mês)
-        if len(vendas_mensais) > 0:
+        # Insights e Total Global
+        total_vendas_global = vendas_mensais['Valor_Venda_Float'].sum()
+        
+        if not vendas_mensais.empty:
             ultimo_mes = vendas_mensais.iloc[-1]
             tendencia = ultimo_mes['Variacao_Mensal']
             
             if pd.isna(tendencia):
                 insight_tendencia = "Início da análise. Ainda não há tendência Mês-a-Mês."
+            # ... (Lógica de insights sarcásticos mantida)
             elif tendencia > 5:
                 insight_tendencia = f"🚀 Forte crescimento de {tendencia:.2f}% no último mês! Mantenha a estratégia."
             elif tendencia > 0:
@@ -72,9 +92,39 @@ def gerar_analise_historica():
             insight_tendencia = "Ainda não há dados suficientes no Histórico para gerar a análise."
 
 
-        # --- 5. GERAÇÃO DO DASHBOARD HTML (Mesmo Layout anterior) ---
+        # --- 4. GERAÇÃO DO DASHBOARD HTML (Código Limpo e Criativo) ---
 
+        # Função de formatação para injetar classes CSS
+        def format_variacao(val):
+            if pd.isna(val):
+                return 'N/A'
+            # Adiciona a formatação e a classe CSS condicionalmente
+            classe = "positivo" if val > 0 else "negativo"
+            return f'<span class="{classe}">{val:.2f}%</span>'
+
+        # Geração da tabela em HTML usando Pandas to_html com formatação segura
+        tabela_dados = vendas_mensais[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']]
+
+        table_html = tabela_dados.to_html(
+            classes='table', 
+            index=False, 
+            formatters={
+                'Valor_Venda_Float': 'R$ {:,.2f}'.format,
+                'Variacao_Mensal': format_variacao
+            }
+        )
+        
+        # Tratamento de cabeçalhos e remoção de tags HTML indesejadas
+        table_html = (
+            table_html.replace('Valor_Venda_Float', 'Total de Vendas')
+                      .replace('Variacao_Mensal', 'Tendência Mensal')
+        )
+        # Removendo a primeira linha de cabeçalho extra gerada pelo to_html com formater
+        table_html = table_html.replace('<tr>\n<th>Mês/Ano</th>\n<th>Total de Vendas</th>\n<th>Tendência Mensal</th>\n</tr>', '', 1)
+
+        # Layout HTML (CSS e Estrutura mantidos para consistência)
         html_content = f"""
+        <!DOCTYPE html>
         <html>
         <head>
             <title>Dashboard Histórico de Vendas - Tendências</title>
@@ -93,7 +143,7 @@ def gerar_analise_historica():
         </head>
         <body>
             <div class="container">
-                <h2>📊 Análise Histórica e Tendências de Vendas (Total: R$ {vendas_mensais['Valor_Venda_Float'].sum():,.2f})</h2>
+                <h2>📊 Análise Histórica e Tendências de Vendas (Total Global: R$ {total_vendas_global:,.2f})</h2>
                 <p>Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} (Lendo {len(df)} registros válidos)</p>
                 
                 <div class="metric-box insight">
@@ -102,38 +152,27 @@ def gerar_analise_historica():
                 </div>
 
                 <h2>📈 Vendas Consolidadas Mês a Mês</h2>
-                <table>
-                    <tr>
-                        <th>Mês/Ano</th>
-                        <th>Total de Vendas</th>
-                        <th>Tendência Mensal</th>
-                    </tr>
-                    {vendas_mensais.to_html(
-                        classes='table', 
-                        index=False, 
-                        formatters={
-                            'Valor_Venda_Float': 'R$ {:,.2f}'.format,
-                            'Variacao_Mensal': lambda x: f'<span class="{"positivo" if x > 0 else "negativo"}">{x:.2f}%</span>' if pd.notna(x) else 'N/A'
-                        },
-                        columns=['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']
-                    ).replace('<thead>', '').replace('</thead>', '').replace('<tbody>', '').replace('</tbody>', '').replace('<tr>', '<tr>').replace('<td>', '<td>')}
-                </table>
+                {table_html}
                 
+                <p style="margin-top: 20px; font-size: 0.9em; color: #777;">Dashboard hospedado em: <a href="{URL_DASHBOARD}" target="_blank">{URL_DASHBOARD}</a></p>
+
             </div>
         </body>
         </html>
         """
 
-        # 6. Salva o HTML
+        # 5. Salva o HTML
         with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
             f.write(html_content)
         
         print(f"Análise Histórica concluída! {OUTPUT_HTML} gerado com sucesso.")
 
     except Exception as e:
-        print(f"Erro na análise histórica: {e}")
+        # Gerando HTML de erro consistente com a saída do agente diário
+        erro_detalhado = f"Erro na análise histórica: {e}"
+        print(erro_detalhado)
         with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
-             f.write(f"<html><body><h2>Erro na Geração do Dashboard Histórico</h2><p>Detalhes: {e}</p></body></html>")
+             f.write(f"<html><body><h2>Erro Crítico na Geração do Dashboard Histórico</h2><p>Detalhes: {e}</p></body></html>")
         
 if __name__ == "__main__":
     gerar_analise_historica()
