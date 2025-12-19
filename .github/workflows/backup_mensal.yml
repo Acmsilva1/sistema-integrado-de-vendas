@@ -1,0 +1,36 @@
+name: Consolidação Mensal de Vendas
+
+# 1. QUANDO RODAR (GATILHO)
+on:
+  schedule:
+    # Roda no primeiro dia de cada mês, à 00:00 (meia-noite) UTC
+    - cron: '0 0 1 * *' 
+  # Opcional: permite rodar manualmente para testes
+  workflow_dispatch:
+
+# 2. OS TRABALHOS (JOB)
+jobs:
+  run_monthly_consolidation:
+    # Use o mesmo ambiente que você está usando (Ubuntu é o padrão)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Código
+        uses: actions/checkout@v4
+
+      # Instalação das dependências (incluindo gspread)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x' 
+      
+      - name: Instalar Dependências
+        run: pip install -r requirements.txt
+
+      # EXECUÇÃO DO SCRIPT DE BACKUP MENSAL
+      - name: Executar Consolidação Mensal
+        # Assumindo que seu script se chamará 'consolidacao_mensal.py'
+        run: python consolidacao_mensal.py
+        env:
+          # Sua variável de segredo para o Service Account, se necessário
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
