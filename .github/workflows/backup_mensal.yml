@@ -1,36 +1,41 @@
-name: Consolidação Mensal de Vendas
+name: Consolidação Mensal de Dados
 
 # 1. QUANDO RODAR (GATILHO)
 on:
   schedule:
-    # Roda no primeiro dia de cada mês, à 00:00 (meia-noite) UTC
+    # Roda no primeiro dia de cada mês, à 00:00 (meia-noite) UTC.
+    # Isso garante que ele pegue os dados do mês ANTERIOR completo.
     - cron: '0 0 1 * *' 
-  # Opcional: permite rodar manualmente para testes
+  
+  # Gatilho manual: permite que você teste ou dispare o backup a qualquer momento
   workflow_dispatch:
 
 # 2. OS TRABALHOS (JOB)
 jobs:
   run_monthly_consolidation:
-    # Use o mesmo ambiente que você está usando (Ubuntu é o padrão)
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Código
+      - name: 📦 Checkout Código
         uses: actions/checkout@v4
 
-      # Instalação das dependências (incluindo gspread)
-      - name: Set up Python
+      # 🐍 Configuração do ambiente Python e Instalação de dependências
+      - name: Set up Python e Instalar Dependências
         uses: actions/setup-python@v5
         with:
           python-version: '3.x' 
       
-      - name: Instalar Dependências
+      - name: Instalar gspread e Outras Bibliotecas
         run: pip install -r requirements.txt
 
-      # EXECUÇÃO DO SCRIPT DE BACKUP MENSAL
+      # 🔐 Configura o arquivo de credenciais do Google Service Account
+      - name: Criar Arquivo de Credenciais
+        run: ${{ secrets.GOOGLE_CREDENTIALS }} > credenciais.json
+        # Importante: O nome do arquivo 'credenciais.json' DEVE bater com o 
+        # 'filename' usado no seu script Python (que você usou como 'caminho/do/seu/credenciais.json')
+        # Para simplificar, vou assumir que você mudará seu script para:
+        # gc = gspread.service_account(filename='credenciais.json')
+
+      # 🚀 EXECUÇÃO DO SCRIPT DE CONSOLIDAÇÃO MENSAL
       - name: Executar Consolidação Mensal
-        # Assumindo que seu script se chamará 'consolidacao_mensal.py'
         run: python consolidacao_mensal.py
-        env:
-          # Sua variável de segredo para o Service Account, se necessário
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
