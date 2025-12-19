@@ -11,11 +11,10 @@ URL_DASHBOARD = "https://acmsilva1.github.io/analise-de-vendas/dashboard_histori
 COLUNA_DATA = 'DATA E HORA'
 COLUNA_VALOR = 'VALOR DA VENDA'
 
-
 def autenticar_gspread():
     """
-    Autentica o gspread usando o secret do ambiente (GCP_SA_CREDENTIALS) ou
-    o método local, garantindo consistência com o agente diário.
+    Função de autenticação robusta, buscando credenciais do secret do GitHub Actions
+    ou do arquivo local, garantindo código limpo e portabilidade.
     """
     try:
         # Tenta carregar o JSON de credenciais da variável de ambiente (CI/CD)
@@ -28,17 +27,18 @@ def autenticar_gspread():
             return gc
         else:
             # Caso não esteja no CI/CD, tenta o método local (credenciais.json)
+            # Isto é útil apenas para testes locais.
             gc = gspread.service_account(filename='credenciais.json')
             print("Autenticação via arquivo local (credenciais.json) concluída.")
             return gc
 
     except Exception as e:
-        print(f"ERRO CRÍTICO de Autenticação/Credenciais: {e}")
-        raise ValueError("Falha na autenticação do Google Sheets. Verifique o secret ou o arquivo 'credenciais.json'.")
+        # Lançamos uma exceção clara para evitar o erro vazio
+        raise ConnectionError(f"Falha na autenticação do Google Sheets. Detalhes: {e}")
 
 
 def gerar_analise_historica():
-    total_vendas_global = 0 # Inicializado fora do try para o HTML de erro
+    total_vendas_global = 0 # Inicializado para ser usado no cabeçalho
     
     try:
         # 1. Autenticação (Agora robusta!)
@@ -56,7 +56,7 @@ def gerar_analise_historica():
         df[COLUNA_VALOR] = df[COLUNA_VALOR].astype(str).str.replace(',', '.', regex=True)
         df['Valor_Venda_Float'] = pd.to_numeric(df[COLUNA_VALOR], errors='coerce')
         
-        # CORREÇÃO CRUCIAL DE GOVERNANÇA: dayfirst=True
+        # CORREÇÃO DE GOVERNANÇA DE DADOS: dayfirst=True para formato DD/MM/YYYY (BR)
         df['Data_Datetime'] = pd.to_datetime(df[COLUNA_DATA], errors='coerce', dayfirst=True)
         
         df.dropna(subset=['Data_Datetime', 'Valor_Venda_Float'], inplace=True)
@@ -72,16 +72,15 @@ def gerar_analise_historica():
             (vendas_mensais['Valor_Venda_Float'] - vendas_mensais['Vendas_Anteriores']) / vendas_mensais['Vendas_Anteriores']
         ) * 100
         
-        # Insights e Total Global
         total_vendas_global = vendas_mensais['Valor_Venda_Float'].sum()
         
         if not vendas_mensais.empty:
             ultimo_mes = vendas_mensais.iloc[-1]
             tendencia = ultimo_mes['Variacao_Mensal']
             
+            # Insights mantidos
             if pd.isna(tendencia):
                 insight_tendencia = "Início da análise. Ainda não há tendência Mês-a-Mês."
-            # ... (Lógica de insights sarcásticos mantida)
             elif tendencia > 5:
                 insight_tendencia = f"🚀 Forte crescimento de {tendencia:.2f}% no último mês! Mantenha a estratégia."
             elif tendencia > 0:
@@ -89,40 +88,49 @@ def gerar_analise_historica():
             else:
                 insight_tendencia = f"📉 Queda de {tendencia:.2f}%. Reveja o plano de vendas imediatamente."
         else:
-            insight_tendencia = "Ainda não há dados suficientes no Histórico para gerar a análise."
+            insight_tendencia = "Nenhum dado válido encontrado após a limpeza. A planilha está vazia ou corrompida."
 
 
-        # --- 4. GERAÇÃO DO DASHBOARD HTML (Código Limpo e Criativo) ---
+        # --- 4. GERAÇÃO DO DASHBOARD HTML (Código Limpo) ---
 
-        # Função de formatação para injetar classes CSS
+        # Função de formatação para injetar classes CSS no Pandas to_html
         def format_variacao(val):
             if pd.isna(val):
                 return 'N/A'
             # Adiciona a formatação e a classe CSS condicionalmente
             classe = "positivo" if val > 0 else "negativo"
-            return f'<span class="{classe}">{val:.2f}%</span>'
+            # O truque é retornar a tag <td> formatada com o span
+            return f'<td class="val-col"><span class="{classe}">{val:.2f}%</span></td>'
 
         # Geração da tabela em HTML usando Pandas to_html com formatação segura
-        tabela_dados = vendas_mensais[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']]
+        tabela_dados = vendas_mensais[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']].copy()
 
+        # O Pandas é chato com formatters embutidos no to_html, vamos pré-formatar
+        tabela_dados['Variacao_Mensal'] = tabela_dados['Variacao_Mensal'].apply(
+            lambda x: f'<td class="val-col"><span class="{"positivo" if x > 0 else "negativo"}">{x:.2f}%</span></td>' if pd.notna(x) else '<td class="val-col">N/A</td>'
+        )
+        tabela_dados['Valor_Venda_Float'] = tabela_dados['Valor_Venda_Float'].apply('R$ {:,.2f}'.format)
+        
         table_html = tabela_dados.to_html(
             classes='table', 
             index=False, 
-            formatters={
-                'Valor_Venda_Float': 'R$ {:,.2f}'.format,
-                'Variacao_Mensal': format_variacao
-            }
+            header=False
         )
         
-        # Tratamento de cabeçalhos e remoção de tags HTML indesejadas
-        table_html = (
-            table_html.replace('Valor_Venda_Float', 'Total de Vendas')
-                      .replace('Variacao_Mensal', 'Tendência Mensal')
-        )
-        # Removendo a primeira linha de cabeçalho extra gerada pelo to_html com formater
-        table_html = table_html.replace('<tr>\n<th>Mês/Ano</th>\n<th>Total de Vendas</th>\n<th>Tendência Mensal</th>\n</tr>', '', 1)
+        # O Pandas Styler não gera a tag <td> com a formatação. Vamos usar o to_html(header=False) e montar a tabela manualmente
+        
+        # Geração da Tabela usando string simples (mais seguro que to_html + replace)
+        table_rows = ""
+        for index, row in vendas_mensais[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']].iterrows():
+             # Formata a variação com classe CSS
+            variacao_display = f'<td class="val-col"><span class="{"positivo" if row["Variacao_Mensal"] > 0 else "negativo"}">{row["Variacao_Mensal"]:.2f}%</span></td>' if pd.notna(row["Variacao_Mensal"]) else '<td class="val-col">N/A</td>'
+            
+            # Formata o valor de venda (mantendo a formatação BRL)
+            venda_display = f'<td class="val-col">R$ {row["Valor_Venda_Float"]:,.2f}</td>'
+            
+            table_rows += f"<tr><td>{row['Mes_Ano']}</td>{venda_display}{variacao_display}</tr>\n"
 
-        # Layout HTML (CSS e Estrutura mantidos para consistência)
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -152,10 +160,20 @@ def gerar_analise_historica():
                 </div>
 
                 <h2>📈 Vendas Consolidadas Mês a Mês</h2>
-                {table_html}
-                
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Mês/Ano</th>
+                            <th>Total de Vendas</th>
+                            <th>Tendência Mensal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_rows}
+                    </tbody>
+                </table>
                 <p style="margin-top: 20px; font-size: 0.9em; color: #777;">Dashboard hospedado em: <a href="{URL_DASHBOARD}" target="_blank">{URL_DASHBOARD}</a></p>
-
+                
             </div>
         </body>
         </html>
@@ -168,9 +186,9 @@ def gerar_analise_historica():
         print(f"Análise Histórica concluída! {OUTPUT_HTML} gerado com sucesso.")
 
     except Exception as e:
-        # Gerando HTML de erro consistente com a saída do agente diário
-        erro_detalhado = f"Erro na análise histórica: {e}"
-        print(erro_detalhado)
+        # Agora o erro deve ter detalhes mais úteis.
+        print(f"Erro Crítico na Geração do Dashboard Histórico: {e}")
+        # Gerando HTML de erro que mostra a exceção completa
         with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
              f.write(f"<html><body><h2>Erro Crítico na Geração do Dashboard Histórico</h2><p>Detalhes: {e}</p></body></html>")
         
