@@ -34,7 +34,7 @@ def carregar_e_limpar_dados():
     worksheet = sh.worksheet(WORKSHEET_NAME)
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
-
+    
     # 2.1. Limpeza da Coluna 'VALOR DA VENDA' e criação de 'Total Limpo'
     df['Total Limpo'] = (
         df['VALOR DA VENDA'] 
@@ -47,11 +47,16 @@ def carregar_e_limpar_dados():
     df['Total Limpo'] = pd.to_numeric(df['Total Limpo'], errors='coerce')
     df.dropna(subset=['Total Limpo'], inplace=True)
 
-    # 2.2. Conversão da Coluna de Data/Hora
-    # CORREÇÃO: Formato explícito para a data: DD/MM/AA HH:MM
-    df['Data/Hora Venda'] = pd.to_datetime(df['DATA E HORA'], errors='coerce', format='%d/%m/%y %H:%M')
+    # 2.2. Conversão da Coluna de Data/Hora (CORRIGIDA)
+    # Formato explícito para a data: DD/MM/AAAA HH:MM:SS
+    # '%Y' (Ano com 4 dígitos) e '%S' (Segundos) foram adicionados.
+    df['Data/Hora Venda'] = pd.to_datetime(df['DATA E HORA'], errors='coerce', format='%d/%m/%Y %H:%M:%S')
     df.dropna(subset=['Data/Hora Venda'], inplace=True)
     df['Hora'] = df['Data/Hora Venda'].dt.hour
+    
+    # 2.3. VERIFICAÇÃO DE INTEGRIDADE (NOVA GOVERNANÇA)
+    if df.empty:
+        raise ValueError("O DataFrame está vazio após a limpeza de datas/valores. Verifique o formato na planilha ou a chave de acesso.")
 
     return df
 
@@ -68,7 +73,7 @@ def criar_dashboard_html(df):
     pico_hora_df = df['Hora'].value_counts()
     pico_hora = pico_hora_df.index[0]
     
-    # Formatação de Moeda (AGORA USANDO A FUNÇÃO HELPER ROBUSTA)
+    # Formatação de Moeda 
     total_vendas_fmt = format_brl(total_vendas)
     melhor_cliente_gasto_fmt = format_brl(melhor_cliente_gasto)
 
@@ -175,7 +180,7 @@ def criar_dashboard_html(df):
     
     return html_content
 
-# --- 4. EXECUÇÃO PRINCIPAL ---
+# --- 4. EXECUÇÃO PRINCIPAL (COM TRATAMENTO DE ERRO MELHORADO) ---
 if __name__ == "__main__":
     try:
         df_vendas = carregar_e_limpar_dados()
@@ -186,7 +191,21 @@ if __name__ == "__main__":
 
         print("Dashboard HTML detalhado e otimizado para responsividade (via CSS) foi gerado com sucesso.")
 
-    except Exception as e:
-        print(f"Ocorreu um erro no script de automação: {e}")
-        exit(1)
+    except ValueError as ve:
+        # Se falhar na limpeza de dados, cria um HTML de erro para feedback instantâneo
+        error_html = f"""
+        <html><body>
+            <h1 style='color: red;'>ERRO CRÍTICO NA LIMPEZA DE DADOS 🛑</h1>
+            <p><strong>André</strong>, o DataFrame está vazio após a limpeza. Verifique o formato dos dados na sua planilha do Google Sheets. A data agora precisa estar em **DD/MM/AAAA HH:MM:SS**.</p>
+            <p>Detalhe: {ve}</p>
+        </body></html>
+        """
+        with open("dashboard_erro.html", "w") as f:
+            f.write(error_html)
+        print(f"ERRO DE DADOS: {ve}. Um arquivo 'dashboard_erro.html' foi gerado para debug.")
+        exit(1) # Força a saída de erro no ambiente de automação.
 
+    except Exception as e:
+        # Erro genérico (autenticação, gspread, etc.)
+        print(f"Ocorreu um erro INESPERADO no script de automação: {e}")
+        exit(1)
