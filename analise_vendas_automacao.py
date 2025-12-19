@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime
 from io import StringIO
 import locale
-import json # <--- NOVO IMPORT AQUI
+import json # Import necessário para ler JSON das credenciais
 
 # Configuração de localização para formatação monetária (Ajuste se necessário)
 try:
@@ -14,22 +14,20 @@ except locale.Error:
     try:
         locale.setlocale(locale.LC_ALL, 'pt_BR')
     except locale.Error:
-        pass # Ignora o erro se a localização não puder ser configurada
+        pass 
 
 # --- 1. CONFIGURAÇÕES E AUTENTICAÇÃO ---
 try:
     SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
     
-    # 🚨 CORREÇÃO CRÍTICA AQUI: Usar json.loads para transformar a string em dict
+    # CORREÇÃO: Usa json.loads para converter a string em dicionário Python
     credentials_dict = json.loads(SHEET_CREDENTIALS_JSON) 
     gc = gspread.service_account_from_dict(credentials_dict)
     
 except Exception as e:
-    # Este bloco só será atingido se a credencial JSON for inválida
-    # ou se estiver rodando localmente sem o arquivo.
+    # Este bloco só é executado se a autenticação do Actions falhar
     print(f"ERRO DE AUTENTICAÇÃO: {e}")
-    # O GITHUB ACTIONS NÃO VAI ENCONTRAR O ARQUIVO LOCAL, ENTÃO AQUI VAI FALHAR SE O TRY FALHAR
-    gc = gspread.service_account() # Mantido para fins de depuração local
+    gc = gspread.service_account() 
 
 SPREADSHEET_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"
 WORKSHEET_NAME = "vendas"
@@ -41,20 +39,21 @@ def carregar_e_limpar_dados():
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
 
-    # Limpeza da Coluna 'Total Venda' e conversão para float
-    df['Total Venda'] = (
-        df['Total Venda']
+    # 2.1. Limpeza da Coluna 'VALOR DA VENDA' e criação de 'Total Limpo'
+    df['Total Limpo'] = (
+        df['VALOR DA VENDA'] # <--- COLUNA CORRIGIDA
         .astype(str)
         .str.replace('R$', '', regex=False)
         .str.replace('.', '', regex=False)
         .str.replace(',', '.', regex=False)
         .str.strip()
     )
-    df['Total Venda'] = pd.to_numeric(df['Total Venda'], errors='coerce')
-    df.dropna(subset=['Total Venda'], inplace=True)
+    df['Total Limpo'] = pd.to_numeric(df['Total Limpo'], errors='coerce')
+    df.dropna(subset=['Total Limpo'], inplace=True)
 
-    # Conversão da Coluna de Data/Hora
-    df['Data/Hora Venda'] = pd.to_datetime(df['Data/Hora Venda'], errors='coerce')
+    # 2.2. Conversão da Coluna de Data/Hora
+    # Ajustei o 'format' para um padrão que costuma funcionar melhor com gspread/sheets
+    df['Data/Hora Venda'] = pd.to_datetime(df['DATA E HORA'], errors='coerce', dayfirst=True) # <--- COLUNA CORRIGIDA
     df.dropna(subset=['Data/Hora Venda'], inplace=True)
     df['Hora'] = df['Data/Hora Venda'].dt.hour
 
@@ -63,13 +62,15 @@ def carregar_e_limpar_dados():
 # --- 3. ANÁLISES E MONTAGEM DO HTML ---
 def criar_dashboard_html(df):
     # --- 3.1. CÁLCULOS DOS KPIS ---
-    total_vendas = df['Total Venda'].sum()
-    sabor_mais_vendido = df['Item'].mode()[0]
+    total_vendas = df['Total Limpo'].sum()
+    sabor_mais_vendido = df['SABORES'].mode()[0] # <--- COLUNA CORRIGIDA
     
-    melhor_cliente_df = df.groupby('Cliente')['Total Venda'].sum().sort_values(ascending=False)
+    # Cliente que gastou mais 
+    melhor_cliente_df = df.groupby('DADOS DO COMPRADOR')['Total Limpo'].sum().sort_values(ascending=False) # <--- COLUNA CORRIGIDA
     melhor_cliente = melhor_cliente_df.index[0]
     melhor_cliente_gasto = melhor_cliente_df.iloc[0]
     
+    # Hora com mais transações
     pico_hora_df = df['Hora'].value_counts()
     pico_hora = pico_hora_df.index[0]
     
@@ -80,7 +81,7 @@ def criar_dashboard_html(df):
     # --- 3.2. VISUALIZAÇÕES COM PLOTLY ---
     
     # Gráfico 1: Vendas por Sabor/Item
-    vendas_por_item = df['Item'].value_counts().reset_index()
+    vendas_por_item = df['SABORES'].value_counts().reset_index() # <--- COLUNA CORRIGIDA
     vendas_por_item.columns = ['Item', 'Contagem']
     fig_sabor = px.bar(
         vendas_por_item.head(10).sort_values(by='Contagem'), 
@@ -102,17 +103,17 @@ def criar_dashboard_html(df):
     fig_hora.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
     
     # Gráfico 3: Melhores Clientes por Gasto Total
+    # Note que o Plotly usa o nome real da coluna do DF (DADOS DO COMPRADOR) para o eixo X
     fig_cliente = px.bar(
-        melhor_cliente_df.head(5).reset_index().rename(columns={'Total Venda': 'Gasto Total'}), 
-        x='Cliente', y='Gasto Total', 
+        melhor_cliente_df.head(5).reset_index().rename(columns={'Total Limpo': 'Gasto Total'}),
+        x='DADOS DO COMPRADOR', y='Gasto Total', 
         title='Top 5 Clientes por Gasto Total',
         template='plotly_dark'
     )
     fig_cliente.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
 
-    # --- 3.3. MONTAGEM FINAL DO HTML COM LAYOUT RESPONSIVO ---
+    # --- 3.3. MONTAGEM FINAL DO HTML COM LAYOUT RESPONSIVO (MANTIDO) ---
     
-    # Estilos CSS Inclusos para Responsividade (Flexbox)
     styles = """
     <style>
         body { font-family: Arial, sans-serif; background-color: #1e1e1e; color: white; margin: 0; padding: 10px; }
@@ -121,9 +122,9 @@ def criar_dashboard_html(df):
         .kpi-box h2 { font-size: 1.1em; margin-bottom: 5px; }
         .kpi-box p { font-size: 1.6em; font-weight: bold; margin-top: 5px; }
         .chart-container { display: flex; flex-wrap: wrap; justify-content: space-between; }
-        .chart-item { width: 100%; margin-bottom: 20px; } /* 100% no mobile */
+        .chart-item { width: 100%; margin-bottom: 20px; } 
         @media (min-width: 768px) {
-            .chart-item { width: 48%; } /* 48% em telas maiores (desktop) */
+            .chart-item { width: 48%; } 
         }
     </style>
     """
@@ -196,4 +197,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Ocorreu um erro no script de automação: {e}")
         exit(1)
-
