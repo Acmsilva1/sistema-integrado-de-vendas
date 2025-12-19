@@ -5,26 +5,31 @@ import plotly.express as px
 from datetime import datetime
 from io import StringIO
 import locale
+import json # <--- NOVO IMPORT AQUI
 
 # Configuração de localização para formatação monetária (Ajuste se necessário)
-# Tenta configurar para pt_BR.UTF-8, se falhar, tenta pt_BR
 try:
     locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 except locale.Error:
     try:
         locale.setlocale(locale.LC_ALL, 'pt_BR')
     except locale.Error:
-        print("Aviso: Configuração de locale pt_BR falhou. Usando formato padrão.")
+        pass # Ignora o erro se a localização não puder ser configurada
 
 # --- 1. CONFIGURAÇÕES E AUTENTICAÇÃO ---
 try:
     SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
-    gc = gspread.service_account_from_dict(pd.read_json(StringIO(SHEET_CREDENTIALS_JSON)))
+    
+    # 🚨 CORREÇÃO CRÍTICA AQUI: Usar json.loads para transformar a string em dict
+    credentials_dict = json.loads(SHEET_CREDENTIALS_JSON) 
+    gc = gspread.service_account_from_dict(credentials_dict)
+    
 except Exception as e:
-    # Caso esteja rodando localmente (necessário ter o arquivo de credenciais)
-    print("ERRO ao carregar credenciais do ambiente. Tentando credenciais locais...")
-    # NOTE: Para rodar localmente, você deve ter seu 'service_account.json' no diretório.
-    gc = gspread.service_account()
+    # Este bloco só será atingido se a credencial JSON for inválida
+    # ou se estiver rodando localmente sem o arquivo.
+    print(f"ERRO DE AUTENTICAÇÃO: {e}")
+    # O GITHUB ACTIONS NÃO VAI ENCONTRAR O ARQUIVO LOCAL, ENTÃO AQUI VAI FALHAR SE O TRY FALHAR
+    gc = gspread.service_account() # Mantido para fins de depuração local
 
 SPREADSHEET_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"
 WORKSHEET_NAME = "vendas"
@@ -191,3 +196,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Ocorreu um erro no script de automação: {e}")
         exit(1)
+
