@@ -1,12 +1,19 @@
 name: Atualizar Dashboard Histórico
 
 on:
-  # Pode ser um agendamento (cron) ou um push para o branch principal
+  # Opção 1: Agendamento Automático
   schedule:
-    # Por exemplo: rodar todo dia à meia-noite UTC
-    - cron: '0 0 * * *'
+    # Roda no dia 1 de cada mês, às 02:00 BRT (05:00 UTC)
+    - cron: '0 5 1 * *' 
+  
+  # Opção 2: Execução Manual
+  # Permite que você acione o workflow manualmente pela interface do GitHub Actions
   workflow_dispatch:
-    # Permite rodar manualmente
+    inputs:
+      motivo:
+        description: 'Motivo da execução manual (Opcional)'
+        required: false
+        default: 'Teste ou correção de dados históricos'
 
 jobs:
   build:
@@ -19,21 +26,22 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # Use a versão do Python que você está usando
+          python-version: '3.10' # Mantenha a versão que você usa
 
       - name: Instalar Dependências
         run: |
-          pip install pandas gspread
+          pip install pandas gspread json # Garante que todas as libs estejam instaladas
 
       - name: Executar o Agente Histórico
+        # Injeção do Secret, garantindo a autenticação (Consistência com Agente Diário)
         env:
-          # O SEGREDO É INJETADO AQUI, garantindo o funcionamento
           GCP_SA_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
         run: |
           python analise_historica.py
 
-      - name: Commit e Push do Dashboard (Gov. de Repositório)
+      - name: Commit e Push do Dashboard
+        # Este passo é crucial para que o novo HTML vá para o GitHub Pages
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: Atualização automática do Dashboard Histórico
-          files: dashboard_historico.html # Garante que apenas o HTML seja versionado
+          commit_message: "Atualização automática do Dashboard Histórico (Dia 1 do mês)"
+          files: dashboard_historico.html # O arquivo que o agente Python gera
