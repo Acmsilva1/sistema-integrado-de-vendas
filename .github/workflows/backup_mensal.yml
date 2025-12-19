@@ -4,10 +4,8 @@ name: Consolidação Mensal de Dados
 on:
   schedule:
     # Roda no primeiro dia de cada mês, à 00:00 (meia-noite) UTC.
-    # Isso garante que ele pegue os dados do mês ANTERIOR completo.
     - cron: '0 0 1 * *' 
   
-  # Gatilho manual: permite que você teste ou dispare o backup a qualquer momento
   workflow_dispatch:
 
 # 2. OS TRABALHOS (JOB)
@@ -26,16 +24,16 @@ jobs:
           python-version: '3.x' 
       
       - name: Instalar gspread e Outras Bibliotecas
+        # É fundamental que gspread esteja neste arquivo!
         run: pip install -r requirements.txt
 
-      # 🔐 Configura o arquivo de credenciais do Google Service Account
+      # 🔐 PASSO 3: CRIA O ARQUIVO DE CREDENCIAIS
       - name: Criar Arquivo de Credenciais
-        run: ${{ secrets.GOOGLE_CREDENTIALS }} > credenciais.json
-        # Importante: O nome do arquivo 'credenciais.json' DEVE bater com o 
-        # 'filename' usado no seu script Python (que você usou como 'caminho/do/seu/credenciais.json')
-        # Para simplificar, vou assumir que você mudará seu script para:
-        # gc = gspread.service_account(filename='credenciais.json')
+        # Nota: O conteúdo do seu Secret é a string JSON.
+        # O 'echo' escreve essa string no arquivo 'credenciais.json' no servidor.
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credenciais.json
 
       # 🚀 EXECUÇÃO DO SCRIPT DE CONSOLIDAÇÃO MENSAL
       - name: Executar Consolidação Mensal
+        # O script consolidacao_mensal.py agora procurará por 'credenciais.json'
         run: python consolidacao_mensal.py
