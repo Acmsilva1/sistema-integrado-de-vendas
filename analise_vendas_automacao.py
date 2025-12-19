@@ -4,17 +4,13 @@ import os
 import plotly.express as px
 from datetime import datetime
 from io import StringIO
-import locale
-import json # Import necessário para ler JSON das credenciais
+import json 
+# Não importamos mais 'locale'
 
-# Configuração de localização para formatação monetária (Ajuste se necessário)
-try:
-    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
-except locale.Error:
-    try:
-        locale.setlocale(locale.LC_ALL, 'pt_BR')
-    except locale.Error:
-        pass 
+# --- FUNÇÃO HELPER PARA FORMATAR BRL (NÃO DEPENDE DO SISTEMA) ---
+def format_brl(value):
+    # Formata para R$ X.XXX,XX
+    return f"R$ {value:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
 
 # --- 1. CONFIGURAÇÕES E AUTENTICAÇÃO ---
 try:
@@ -25,7 +21,7 @@ try:
     gc = gspread.service_account_from_dict(credentials_dict)
     
 except Exception as e:
-    # Este bloco só é executado se a autenticação do Actions falhar
+    # A autenticação será feita localmente, se o Actions falhar.
     print(f"ERRO DE AUTENTICAÇÃO: {e}")
     gc = gspread.service_account() 
 
@@ -41,7 +37,7 @@ def carregar_e_limpar_dados():
 
     # 2.1. Limpeza da Coluna 'VALOR DA VENDA' e criação de 'Total Limpo'
     df['Total Limpo'] = (
-        df['VALOR DA VENDA'] # <--- COLUNA CORRIGIDA
+        df['VALOR DA VENDA'] 
         .astype(str)
         .str.replace('R$', '', regex=False)
         .str.replace('.', '', regex=False)
@@ -52,8 +48,8 @@ def carregar_e_limpar_dados():
     df.dropna(subset=['Total Limpo'], inplace=True)
 
     # 2.2. Conversão da Coluna de Data/Hora
-    # Ajustei o 'format' para um padrão que costuma funcionar melhor com gspread/sheets
-    df['Data/Hora Venda'] = pd.to_datetime(df['DATA E HORA'], errors='coerce', dayfirst=True) # <--- COLUNA CORRIGIDA
+    # CORREÇÃO: Formato explícito para a data: DD/MM/AA HH:MM
+    df['Data/Hora Venda'] = pd.to_datetime(df['DATA E HORA'], errors='coerce', format='%d/%m/%y %H:%M')
     df.dropna(subset=['Data/Hora Venda'], inplace=True)
     df['Hora'] = df['Data/Hora Venda'].dt.hour
 
@@ -63,25 +59,23 @@ def carregar_e_limpar_dados():
 def criar_dashboard_html(df):
     # --- 3.1. CÁLCULOS DOS KPIS ---
     total_vendas = df['Total Limpo'].sum()
-    sabor_mais_vendido = df['SABORES'].mode()[0] # <--- COLUNA CORRIGIDA
+    sabor_mais_vendido = df['SABORES'].mode()[0]
     
-    # Cliente que gastou mais 
-    melhor_cliente_df = df.groupby('DADOS DO COMPRADOR')['Total Limpo'].sum().sort_values(ascending=False) # <--- COLUNA CORRIGIDA
+    melhor_cliente_df = df.groupby('DADOS DO COMPRADOR')['Total Limpo'].sum().sort_values(ascending=False)
     melhor_cliente = melhor_cliente_df.index[0]
     melhor_cliente_gasto = melhor_cliente_df.iloc[0]
     
-    # Hora com mais transações
     pico_hora_df = df['Hora'].value_counts()
     pico_hora = pico_hora_df.index[0]
     
-    # Formatação de Moeda
-    total_vendas_fmt = locale.currency(total_vendas, grouping=True)
-    melhor_cliente_gasto_fmt = locale.currency(melhor_cliente_gasto, grouping=True)
+    # Formatação de Moeda (AGORA USANDO A FUNÇÃO HELPER ROBUSTA)
+    total_vendas_fmt = format_brl(total_vendas)
+    melhor_cliente_gasto_fmt = format_brl(melhor_cliente_gasto)
 
     # --- 3.2. VISUALIZAÇÕES COM PLOTLY ---
     
     # Gráfico 1: Vendas por Sabor/Item
-    vendas_por_item = df['SABORES'].value_counts().reset_index() # <--- COLUNA CORRIGIDA
+    vendas_por_item = df['SABORES'].value_counts().reset_index() 
     vendas_por_item.columns = ['Item', 'Contagem']
     fig_sabor = px.bar(
         vendas_por_item.head(10).sort_values(by='Contagem'), 
@@ -103,7 +97,6 @@ def criar_dashboard_html(df):
     fig_hora.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
     
     # Gráfico 3: Melhores Clientes por Gasto Total
-    # Note que o Plotly usa o nome real da coluna do DF (DADOS DO COMPRADOR) para o eixo X
     fig_cliente = px.bar(
         melhor_cliente_df.head(5).reset_index().rename(columns={'Total Limpo': 'Gasto Total'}),
         x='DADOS DO COMPRADOR', y='Gasto Total', 
@@ -112,7 +105,7 @@ def criar_dashboard_html(df):
     )
     fig_cliente.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
 
-    # --- 3.3. MONTAGEM FINAL DO HTML COM LAYOUT RESPONSIVO (MANTIDO) ---
+    # --- 3.3. MONTAGEM FINAL DO HTML COM LAYOUT RESPONSIVO ---
     
     styles = """
     <style>
@@ -150,7 +143,6 @@ def criar_dashboard_html(df):
     </div>
     """
 
-    # Combina tudo no HTML final
     html_content = f"""
     <!DOCTYPE html>
     <html>
