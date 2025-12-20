@@ -82,18 +82,37 @@ def gerar_analise_historica():
         
         print(f"DEBUG: 4.6 {len(df_validos)} linhas válidas prontas para análise.")
 
-        # 5. Análise e Tendências
+        # 5. Análise e Tendências (AJUSTE FINO AQUI!)
+        
+        # 5.1 Captura o ano atual para YTD (Year-to-Date)
+        ano_atual = datetime.now().year
+        
         df_validos['Mes_Ano'] = df_validos['Data_Datetime'].dt.to_period('M')
+        
+        # 5.2 Agrupamento MENSAL EM TODO O HISTÓRICO (para não quebrar a comparação Dez/Jan)
         vendas_mensais = df_validos.groupby('Mes_Ano')['Valor_Venda_Float'].sum().reset_index()
-        vendas_mensais['Mes_Ano'] = vendas_mensais['Mes_Ano'].astype(str) 
+        vendas_mensais['Mes_Ano'] = vendas_mensais['Mes_Ano'].astype(str)
 
+        # 5.3 Cálculo da Variação Mensal (MoM) em TODO O HISTÓRICO (Preserva a transição de ano)
         vendas_mensais['Vendas_Anteriores'] = vendas_mensais['Valor_Venda_Float'].shift(1)
         vendas_mensais['Variacao_Mensal'] = (
             (vendas_mensais['Valor_Venda_Float'] - vendas_mensais['Vendas_Anteriores']) / vendas_mensais['Vendas_Anteriores']
         ) * 100
+
         
-        total_vendas_global = vendas_mensais['Valor_Venda_Float'].sum()
+        # --- AJUSTE FINO DE GOVERNANÇA: FILTRAGEM PARA O DASHBOARD ---
         
+        # 5.4 Filtra a tabela para o Ano Atual (YTD) para exibir no HTML
+        # O filtro usa a coluna 'Mes_Ano' que é uma string no formato 'AAAA-MM'
+        vendas_mensais_ytd = vendas_mensais[
+            vendas_mensais['Mes_Ano'].str.startswith(str(ano_atual)) 
+        ].copy() 
+
+        # 5.5 Cálculo do YTD Total (Vendas do Ano Atual)
+        total_vendas_ytd = vendas_mensais_ytd['Valor_Venda_Float'].sum()
+        
+        # O insight de tendência deve usar o último mês do histórico COMPLETO (vendas_mensais), 
+        # garantindo que a última variação calculada (Dez->Jan) seja usada.
         if not vendas_mensais.empty:
             ultimo_mes = vendas_mensais.iloc[-1]
             tendencia = ultimo_mes['Variacao_Mensal']
@@ -111,7 +130,8 @@ def gerar_analise_historica():
 
         # 6. Geração da Tabela HTML
         table_rows = ""
-        for index, row in vendas_mensais[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']].iterrows():
+        # Agora o loop usa a tabela filtrada para o ano atual (vendas_mensais_ytd)
+        for index, row in vendas_mensais_ytd[['Mes_Ano', 'Valor_Venda_Float', 'Variacao_Mensal']].iterrows():
             variacao_display = f'<td class="val-col"><span class="{"positivo" if row["Variacao_Mensal"] > 0 else "negativo"}">{row["Variacao_Mensal"]:.2f}%</span></td>' if pd.notna(row["Variacao_Mensal"]) else '<td class="val-col">N/A</td>'
             venda_display = f'<td class="val-col">R$ {row["Valor_Venda_Float"]:,.2f}</td>'
             table_rows += f"<tr><td>{row['Mes_Ano']}</td>{venda_display}{variacao_display}</tr>\n"
@@ -136,7 +156,7 @@ def gerar_analise_historica():
         </head>
         <body>
             <div class="container">
-                <h2>📊 Análise Histórica e Tendências de Vendas (Total Global: R$ {total_vendas_global:,.2f})</h2>
+                <h2>📊 Análise Histórica e Tendências de Vendas ({ano_atual} YTD Total: R$ {total_vendas_ytd:,.2f})</h2>
                 <p>Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} (Lendo {len(df_validos)} registros válidos)</p>
                 
                 <div class="metric-box insight">
