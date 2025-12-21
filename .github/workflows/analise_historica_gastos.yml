@@ -1,0 +1,51 @@
+name: Atualizar Dashboard Histórico de Gastos 💸
+
+on:
+  # Opção 1: Agendamento Automático
+  schedule:
+    # Roda no dia 1 de cada mês, às 02:00 BRT (05:00 UTC)
+    - cron: '0 5 1 * *' 
+  
+  # Opção 2: Execução Manual
+  workflow_dispatch:
+    inputs:
+      motivo:
+        description: 'Motivo da execução manual (Opcional)'
+        required: false
+        default: 'Teste ou correção de dados históricos de gastos'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    # Permissão de escrita para o token da Action
+    permissions:
+      contents: write # Permite que o bot comite e faça push no repositório
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Dependências
+        run: |
+          pip install pandas gspread
+
+      - name: Executar o Agente Histórico de Gastos
+        # Injeção do Secret, garantindo a autenticação
+        env:
+          GCP_SA_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
+        run: |
+          # Chama o NOVO script de gastos
+          python analise_historica_gastos.py
+
+      - name: Commit e Push do Dashboard de Gastos
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Atualização automática do Dashboard Histórico de Gastos (Dia 1 do mês)"
+          # GOVERNANÇA: Usando o nome do NOVO arquivo HTML
+          file_pattern: dashboard_historico_gastos.html
