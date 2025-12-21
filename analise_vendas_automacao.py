@@ -54,25 +54,23 @@ def carregar_e_limpar_dados():
         raise ValueError("O DataFrame está vazio após a limpeza de datas/valores. Sem dados para análise.")
 
     # 2.4. FILTRAGEM TEMPORAL PARA O DASHBOARD
-    
     data_atual = datetime.now().date()
     
-    # Filtro Diário
     df_dia_atual = df[df['Data/Hora Venda'].dt.date == data_atual].copy()
     
-    # Filtro Mensal
     mes_atual = data_atual.month
     ano_atual = data_atual.year
     df_mes_atual = df[(df['Data/Hora Venda'].dt.month == mes_atual) & (df['Data/Hora Venda'].dt.year == ano_atual)].copy()
 
     return df, df_mes_atual, df_dia_atual
 
-# --- FUNÇÃO HELPER PARA CÁLCULOS ROBUSTOS (EVITA CRASHES) ---
+# --- FUNÇÃO HELPER PARA CÁLCULOS ROBUSTOS (AGORA INCLUI CONTAGEM) ---
 def calcular_kpis(df, periodo="Dia"):
     if df.empty:
         return {
             'total': 0.0,
             'total_fmt': format_brl(0.0),
+            'contagem': 0, # NOVO: Contagem de Vendas
             'sabor': f'Sem Vendas ({periodo})',
             'cliente': f'N/A ({periodo})',
             'cliente_gasto_fmt': format_brl(0.0),
@@ -80,6 +78,7 @@ def calcular_kpis(df, periodo="Dia"):
         }
     
     total_vendas = df['Total Limpo'].sum()
+    contagem = len(df) # NOVO: Contagem de Vendas
     sabor_mais_vendido = df['SABORES'].mode().iloc[0] if not df['SABORES'].empty else f'N/A ({periodo})'
     
     melhor_cliente_df = df.groupby('DADOS DO COMPRADOR')['Total Limpo'].sum().sort_values(ascending=False)
@@ -92,6 +91,7 @@ def calcular_kpis(df, periodo="Dia"):
     return {
         'total': total_vendas,
         'total_fmt': format_brl(total_vendas),
+        'contagem': contagem, # NOVO: Contagem de Vendas
         'sabor': sabor_mais_vendido,
         'cliente': melhor_cliente,
         'cliente_gasto_fmt': format_brl(melhor_cliente_gasto),
@@ -106,12 +106,9 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     kpis_dia = calcular_kpis(df_dia, periodo="Dia")
     
     # --- 3.2. VISUALIZAÇÕES COM PLOTLY ---
-    
-    # Gráfico 1: Vendas por Sabor/Item (Mensal)
+    # Usando df_mes para contexto
     vendas_por_item = df_mes['SABORES'].value_counts().reset_index() 
     vendas_por_item.columns = ['Item', 'Contagem']
-    
-    # Se o DF do mês estiver vazio, o Plotly ainda pode criar um gráfico vazio sem quebrar
     fig_sabor = px.bar(
         vendas_por_item.head(10).sort_values(by='Contagem', ascending=True), 
         x='Contagem', y='Item', 
@@ -121,7 +118,7 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     )
     fig_sabor.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
 
-    # Gráfico 2: Pico de Vendas por Hora do Dia (Diário)
+    # Usando df_dia para foco imediato
     pico_hora_df_dia = df_dia['Hora'].value_counts()
     fig_hora = px.bar(
         pico_hora_df_dia.reset_index(), 
@@ -132,7 +129,7 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     fig_hora.update_xaxes(tick0=0, dtick=1)
     fig_hora.update_layout(autosize=True, height=500, margin=dict(l=10, r=10, t=40, b=10))
     
-    # Gráfico 3: Melhores Clientes por Gasto Total (Mensal)
+    # Melhores Clientes por Gasto Total (Mensal)
     melhor_cliente_df_mes = df_mes.groupby('DADOS DO COMPRADOR')['Total Limpo'].sum().sort_values(ascending=False)
     fig_cliente = px.bar(
         melhor_cliente_df_mes.head(5).reset_index().rename(columns={'Total Limpo': 'Gasto Total'}),
@@ -160,7 +157,7 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     </style>
     """
 
-    # Blocos KPI Mensal
+    # Blocos KPI Mensal - Adicionando Contagem
     kpi_mes_html = f"""
     <div class="kpi-container">
         <div class="kpi-box">
@@ -168,8 +165,8 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
             <p style="color: #64ffda;">{kpis_mes['total_fmt']}</p>
         </div>
         <div class="kpi-box">
-            <h2 style="color: #2196F3;">Sabor Campeão (MÊS)</h2>
-            <p style="color: #2196F3;">{kpis_mes['sabor']}</p>
+            <h2 style="color: #2196F3;">Contagem de Vendas (MÊS)</h2>
+            <p style="color: #2196F3;">{kpis_mes['contagem']}</p>
         </div>
         <div class="kpi-box">
             <h2 style="color: #E91E63;">Melhor Cliente (MÊS)</h2>
@@ -178,7 +175,7 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     </div>
     """
     
-    # Blocos KPI Diário
+    # Blocos KPI Diário - Adicionando Contagem
     kpi_dia_html = f"""
     <div class="kpi-container" style="background-color: #383838;">
         <div class="kpi-box">
@@ -186,8 +183,8 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
             <p style="color: #FF9800;">{kpis_dia['total_fmt']}</p>
         </div>
         <div class="kpi-box">
-            <h2 style="color: #00BCD4;">Sabor Campeão (HOJE)</h2>
-            <p style="color: #00BCD4;">{kpis_dia['sabor']}</p>
+            <h2 style="color: #00BCD4;">Contagem de Vendas (HOJE)</h2>
+            <p style="color: #00BCD4;">{kpis_dia['contagem']}</p>
         </div>
         <div class="kpi-box">
             <h2 style="color: #FF5722;">Pico de Vendas (HOJE)</h2>
@@ -239,17 +236,17 @@ def criar_dashboard_html(df_completo, df_mes, df_dia):
     
     return html_content
 
-# --- 4. EXECUÇÃO PRINCIPAL (COM SAÍDA CORRIGIDA) ---
+# --- 4. EXECUÇÃO PRINCIPAL (SAÍDA CORRETA) ---
 if __name__ == "__main__":
     try:
         df_completo, df_mes, df_dia = carregar_e_limpar_dados() 
         final_html = criar_dashboard_html(df_completo, df_mes, df_dia)
 
-        # 🚨 CORREÇÃO DE GOVERNANÇA: Usando o nome de arquivo original para sobrescrever
+        # Usando o nome de arquivo original para sobrescrever o que o GitHub Pages exibe.
         with open("dashboard_vendas_final.html", "w") as f:
             f.write(final_html)
 
-        print("Dashboard HTML multicamadas gerado com sucesso no arquivo 'dashboard_vendas_final.html'.")
+        print("Dashboard HTML multicamadas FINAL gerado com sucesso.")
 
     except ValueError as ve:
         error_html = f"""
