@@ -1,26 +1,24 @@
-name: Atualizar Dashboard Histórico de Gastos 💸
+name: Gerar Dashboard de Lucro Semanal 📈
 
 on:
-  # Opção 1: Agendamento Automático
+  # Roda a cada 7 dias (Todo domingo às 5:00 AM)
   schedule:
-    # Roda no dia 1 de cada mês, às 02:00 BRT (05:00 UTC)
-    - cron: '0 5 1 * *' 
-  
-  # Opção 2: Execução Manual
+    - cron: '0 5 * * 0' # <--- CRON ATUALIZADO para semanal
+    
+  # Execução Manual
   workflow_dispatch:
     inputs:
       motivo:
-        description: 'Motivo da execução manual (Opcional)'
+        description: 'Motivo da execução manual do dashboard semanal de Lucro'
         required: false
-        default: 'Teste ou correção de dados históricos de gastos'
+        default: 'Verificação rápida do Lucro'
 
 jobs:
-  build:
+  build_historico:
     runs-on: ubuntu-latest
     
-    # Permissão de escrita para o token da Action
     permissions:
-      contents: write # Permite que o bot comite e faça push no repositório
+      contents: write
 
     steps:
       - name: Checkout do Repositório
@@ -32,20 +30,18 @@ jobs:
           python-version: '3.10'
 
       - name: Instalar Dependências
+        # Agora só precisamos de pandas e gspread. O scikit-learn é só para o ML.
         run: |
           pip install pandas gspread
 
-      - name: Executar o Agente Histórico de Gastos
-        # Injeção do Secret, garantindo a autenticação
+      - name: Executar o Analisador de Lucro Semanal
         env:
           GCP_SA_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
         run: |
-          # Chama o NOVO script de gastos
-          python analise_historica_gastos.py
+          python analise_historica.py # <--- Script correto para o Lucro Semanal
 
-      - name: Commit e Push do Dashboard de Gastos
+      - name: Commit e Push do Dashboard de Lucro
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Atualização automática do Dashboard Histórico de Gastos (Dia 1 do mês)"
-          # GOVERNANÇA: Usando o nome do NOVO arquivo HTML
-          file_pattern: dashboard_historico_gastos.html
+          commit_message: "Atualização automática do Dashboard de Lucro Semanal"
+          file_pattern: dashboard_lucro_semanal.html # <--- NOVO ARQUIVO DE SAÍDA
