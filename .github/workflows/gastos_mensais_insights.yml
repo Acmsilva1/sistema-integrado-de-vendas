@@ -1,0 +1,47 @@
+name: 💸 Gerar Dashboard Histórico de Gastos (Mensal) 
+
+# 1. Configuração do Gatilho
+# Roda todo dia 01 do mês, às 03:00 UTC (00:00 AM no Brasil, se estiver em -03)
+on:
+  schedule:
+    - cron: '0 3 1 * *' 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # 2. Variáveis de Ambiente e Checagem de Credenciais
+    env:
+      PYTHON_VERSION: '3.11'
+      # O gspread vai buscar as credenciais aqui!
+      GCP_SA_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }} 
+
+    steps:
+    - name: ⬇️ Checkout do Código Fonte
+      uses: actions/checkout@v4
+
+    # 3. Setup do Ambiente Python
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: 📦 Instalar Dependências Necessárias
+      run: |
+        # As bibliotecas necessárias para gspread e pandas
+        pip install gspread pandas numpy
+
+    # 4. Execução do Script de Análise de Gastos
+    - name: 🏃 Executar Análise Histórica de Gastos
+      # Este é o script que você anexou, responsável por gerar o dashboard_historico_gastos.html
+      run: python analise_historica_gastos.py 
+
+    # 5. Publicação do Dashboard (Governança de Arquivos)
+    - name: 💾 Commit e Push do Dashboard de Gastos
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        # Mensagem que aparecerá no histórico do GitHub
+        commit_message: "Atualização automática do Dashboard Histórico de Gastos"
+        # Garante que apenas o novo HTML seja committado (GOVERNANÇA: Evita poluir o histórico)
+        file_pattern: dashboard_historico_gastos.html
