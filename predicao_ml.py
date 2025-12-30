@@ -10,17 +10,17 @@ from gspread.exceptions import WorksheetNotFound, APIError
 from sklearn.linear_model import LinearRegression 
 from sklearn.metrics import mean_absolute_error
 
-# --- CONFIGURAÇÕES DE DADOS HISTÓRICOS (UNIFICADO) ---
-# ID ÚNICO para a planilha "HISTORICO DE VENDAS E GASTOS"
+# --- CONFIGURAÇÕES DE DADOS (UNIFICADO E CORRIGIDO) ---
+# Assumindo que a planilha de VENDAS tem o ID principal, já que ambas as abas estão nela.
 ID_PLANILHA_UNICA = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y"
 
 ABA_VENDAS = "VENDAS"
-ABA_GASTOS = "GASTOS"
+ABA_GASTOS = "GASTOS" # Colunas: DATA E HORA, PRODUTO, QUANTIDADE, VALOR
 
-# Colunas CORRIGIDAS conforme sua planilha
+# Colunas (CORRIGIDAS E NOVAS)
 COLUNA_VALOR_VENDA = 'VALOR DA VENDA'
-COLUNA_COMPRADOR = 'DADOS DO COMPRADOR' # <-- CORRIGIDO
-COLUNA_ITEM_VENDIDO = 'PRODUTOS'       # <-- CORRIGIDO (Assumindo que é na aba VENDAS para métrica de Receita)
+COLUNA_COMPRADOR = 'DADOS DO COMPRADOR' # Para a métrica de Melhor Comprador (Aba VENDAS)
+COLUNA_ITEM_VENDIDO = 'SABORES'       # Para a métrica de Sabor/Produto Mais Vendido (Aba VENDAS)
 
 COLUNA_VALOR_GASTO = 'VALOR' 
 COLUNA_DATA = 'DATA E HORA' 
@@ -37,7 +37,7 @@ def format_brl(value):
 def autenticar_gspread():
     SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
     if not SHEET_CREDENTIALS_JSON:
-        raise ConnectionError("Variável de ambiente 'GCP_SA_CREDENTIALS' não encontrada. O fluxo vai falhar!")
+        raise ConnectionError("Variável de ambiente 'GCP_SA_CREDENTIALS' não encontrada.")
     credentials_dict = json.loads(SHEET_CREDENTIALS_JSON) 
     return gspread.service_account_from_dict(credentials_dict)
 
@@ -66,7 +66,7 @@ def carregar_dados_de_planilha(gc, sheet_id, aba_nome, coluna_valor, prefixo):
         
         df_validos = df.dropna(subset=['Data_Datetime', f'{prefixo}_Float']).copy()
         
-        # Se for VENDAS, retorna o DF completo (bruto) para análise detalhada (Comprador/Produto)
+        # SE FOR VENDAS, RETORNA O DF BRUTO para permitir as análises de Comprador/Sabor (KPIs de Negócio)
         if aba_nome == ABA_VENDAS:
              return df_validos
         
@@ -82,21 +82,21 @@ def carregar_dados_de_planilha(gc, sheet_id, aba_nome, coluna_valor, prefixo):
         return pd.DataFrame()
 
 def carregar_e_combinar_dados(gc):
-    # Carrega dados brutos de Vendas e dados mensais de Gastos
+    # Usamos ID_PLANILHA_UNICA para ambas as chamadas
     df_vendas_bruto = carregar_dados_de_planilha(gc, ID_PLANILHA_UNICA, ABA_VENDAS, COLUNA_VALOR_VENDA, 'Vendas')
     df_gastos_mensal = carregar_dados_de_planilha(gc, ID_PLANILHA_UNICA, ABA_GASTOS, COLUNA_VALOR_GASTO, 'Gastos')
     
     if df_vendas_bruto.empty or df_gastos_mensal.empty:
         raise ValueError("Dados insuficientes para análise de Lucro (Vendas ou Gastos estão vazios).")
 
-    # 1. Preparar DF Vendas para consolidação Mensal
+    # 1. Preparar DF Vendas (BRUTO) para consolidação Mensal
     df_vendas_mensal = df_vendas_bruto.copy()
     df_vendas_mensal['Mes_Ano'] = df_vendas_mensal['Data_Datetime'].dt.to_period('M')
     df_vendas_mensal = df_vendas_mensal.groupby('Mes_Ano')['Vendas_Float'].sum().reset_index()
     df_vendas_mensal.columns = ['Mes_Ano', 'Total_Vendas']
     df_vendas_mensal = df_vendas_mensal.set_index('Mes_Ano')
     
-    # 2. Combinar Mensalmente Vendas e Gastos (Outer Join para incluir meses sem Gastos ou Vendas)
+    # 2. Combinar Mensalmente Vendas e Gastos
     df_combinado = pd.merge(
         df_vendas_mensal, 
         df_gastos_mensal, 
@@ -113,7 +113,7 @@ def carregar_e_combinar_dados(gc):
     if len(df_combinado) < 4:
         raise ValueError(f"Dados insuficientes para ML: Apenas {len(df_combinado)} meses consolidados. Mínimo de 4 meses é recomendado.")
             
-    # Retorna o consolidado mensal (para ML e auditoria) e o bruto de vendas (para métricas de negócio)
+    # Retorna o consolidado mensal (para ML e auditoria) e o BRUTO de vendas (para métricas de negócio)
     return df_combinado, df_vendas_bruto
 
 def treinar_e_prever(df_mensal):
@@ -133,8 +133,9 @@ def treinar_e_prever(df_mensal):
     
     return previsao_proximo_mes, mae, ultimo_lucro_real
 
+# --- NOVO: Função para extrair métricas de Negócio (Agora incluída e com nomes corrigidos) ---
 def analisar_metricas_negocio(df_vendas_bruto):
-    """Calcula o Melhor Comprador e o Produto Mais Vendido (baseado em receita)."""
+    """Calcula o Melhor Comprador e o Sabor Mais Vendido (baseado em receita)."""
     # Verifica a existência das colunas CORRIGIDAS
     if COLUNA_COMPRADOR not in df_vendas_bruto.columns or COLUNA_ITEM_VENDIDO not in df_vendas_bruto.columns:
         print(f"Alerta: Colunas '{COLUNA_COMPRADOR}' ou '{COLUNA_ITEM_VENDIDO}' não encontradas no DF de Vendas.")
@@ -147,7 +148,7 @@ def analisar_metricas_negocio(df_vendas_bruto):
         
     melhor_comprador = comprador_df.sort_values(by='Vendas_Float', ascending=False).iloc[0]
     
-    # Produto Mais Vendido
+    # Sabor/Produto Mais Vendido
     produto_df = df_vendas_bruto.groupby(COLUNA_ITEM_VENDIDO)['Vendas_Float'].sum().reset_index()
     produto_mais_vendido = produto_df.sort_values(by='Vendas_Float', ascending=False).iloc[0]
 
@@ -161,6 +162,7 @@ def analisar_metricas_negocio(df_vendas_bruto):
     )
 
     return resultado_comprador, resultado_produto
+# --------------------------------------------------------------------------------
 
 def gerar_tabela_auditoria(df_mensal):
     """Gera o HTML da tabela histórica de Lucro, Vendas e Gastos."""
@@ -224,7 +226,7 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
             </td>
         </tr>
         """
-
+    # 
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -274,14 +276,14 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
             </div>
             
             <h2>🏆 Principais Indicadores de Negócio</h2>
-            <p>Métricas de negócio baseadas nos dados brutos de Vendas.</p>
+            <p>Métricas de negócio baseadas nos dados brutos da aba VENDAS.</p>
             <div class="grid-2">
                  <div class="metric-card">
                     <h4>Melhor Comprador (Receita Gerada)</h4>
                     <p>{melhor_comprador}</p>
                 </div>
                  <div class="metric-card">
-                    <h4>Produto Mais Vendido (Receita Gerada)</h4>
+                    <h4>Sabor Mais Vendido (Receita Gerada)</h4>
                     <p>{produto_mais_vendido}</p>
                 </div>
             </div>
@@ -327,25 +329,21 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
     print(f"Dashboard de ML gerado com sucesso: {OUTPUT_HTML}")
 
 
-# --- EXECUÇÃO PRINCIPAL ---
+# --- EXECUÇÃO PRINCIPAL (CORRIGIDA) ---
 if __name__ == "__main__":
     try:
-        # Autentica no Google Sheets
         gc = autenticar_gspread()
         
-        # Carrega e combina os dados, retornando o DF mensal e o DF bruto de vendas
-        # AQUI ESTÁ UMA PEQUENA CORREÇÃO DE LÓGICA: O CÓDIGO ANTERIOR NÃO ESTAVA ENVIANDO O df_vendas_bruto 
-        # MAS O CÓDIGO COMPLETO ENVIADO NA RESPOSTA ANTERIOR ESTAVA. ESTOU RESTAURANDO A VERSÃO CORRETA.
+        # O retorno AGORA É DUPLO: df_mensal (consolidado) e df_vendas_bruto (para métricas)
         df_mensal, df_vendas_bruto = carregar_e_combinar_dados(gc) 
         
         if not df_mensal.empty:
-            # Treina e Prevê Lucro
             previsao, mae, ultimo_lucro_real = treinar_e_prever(df_mensal)
             
-            # Calcula Métricas de Negócio (agora com nomes de coluna corrigidos)
+            # NOVO: Calcular Métricas de Negócio
             melhor_comprador, produto_mais_vendido = analisar_metricas_negocio(df_vendas_bruto)
             
-            # Monta e salva o Dashboard HTML
+            # Passando todos os argumentos, incluindo as novas métricas
             montar_dashboard_ml(
                 previsao, 
                 mae, 
@@ -361,4 +359,4 @@ if __name__ == "__main__":
         error_message = str(e)
         print(f"ERRO CRÍTICO NA EXECUÇÃO DO ML: {error_message}")
         with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
-             f.write(f"<html><body><h2>Erro Crítico na Geração do ML Dashboard</h2><p>Detalhes: {error_message}</p><p>Verifique o arquivo JSON de credenciais ou os nomes das colunas na sua planilha.</p></body></html>")
+             f.write(f"<html><body><h2>Erro Crítico na Geração do ML Dashboard</h2><p>Detalhes: {error_message}</p><p>Verifique as credenciais, permissões de acesso ou os nomes das colunas: VENDAS (DATA E HORA, SABORES, DADOS DO COMPRADOR, VALOR DA VENDA), GASTOS (DATA E HORA, VALOR)</p></body></html>")
