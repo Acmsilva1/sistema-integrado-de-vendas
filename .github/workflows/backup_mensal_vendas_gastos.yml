@@ -5,18 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       force_run:
-        description: 'Forçar execução manual (ignora verificação de data 1 e 16)?'
+        description: 'Forçar execução manual (ignora verificação de data 1)?'
         required: false
         default: 'false'
         type: boolean
 
-  # 2. Gatilhos Agendados: Agora às 02:00 AM no Brasil (05:00 UTC).
+  # 2. Gatilho Agendado: Apenas no dia 1, às 02:00 AM BRT (05:00 UTC).
   schedule:
-    # Roda no dia 1 de cada mês, às 02:00 AM BRT (05:00 UTC).
-    - cron: '0 5 1 * *'
-    # Roda no dia 16 de cada mês, às 02:00 AM BRT (05:00 UTC).
-    - cron: '0 5 16 * *'
-
+    # Roda apenas no dia 1 de cada mês, às 05:00 UTC (02:00 AM BRT).
+    - cron: '0 5 1 * *' 
+    
 jobs:
   run_consolidation:
     runs-on: ubuntu-latest
@@ -35,11 +33,10 @@ jobs:
           pip install gspread
 
       - name: 4. Executar o Script do Agente de Backup
-        # Certifique-se de que este nome de arquivo está correto no seu repositório.
         run: python backup_gastos_despesas_mensal.py
         env:
           # Secret: Credenciais de Serviço do Google Cloud
           GSPREAD_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
           
-          # NOVO: Variável para Forçar a Execução (Usado pelo script Python)
+          # Variável para Forçar a Execução (Lê o input manual)
           FORCA_EXECUCAO_MANUAL: ${{ github.event.inputs.force_run }}
