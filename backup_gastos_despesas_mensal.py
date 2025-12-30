@@ -34,7 +34,7 @@ def autenticar_gspread():
 
 def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name, aba_historico_name):
     """
-    Função modularizada que copia e, APÓS O SUCESSO, limpa a aba de origem.
+    Função modularizada que copia os dados. A LIMPEZA DA ORIGEM AGORA É MANUAL.
     """
     print(f"\n--- Iniciando Backup: {aba_origem_name.upper()} para {aba_historico_name} ---")
     
@@ -57,14 +57,12 @@ def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name,
         planilha_historico.append_rows(dados_para_copiar, value_input_option='USER_ENTERED')
         
         print(f"Backup de {len(dados_para_copiar)} linhas concluído e consolidado na aba '{aba_historico_name}'.")
+        print(f"=========================================================================")
+        print(f"!!! ATENÇÃO !!!: A limpeza da aba de origem ('{aba_origem_name}') NÃO FOI FEITA.")
+        print(f"PARA EVITAR DUPLICAÇÃO NO PRÓXIMO MÊS, LIMPE MANUALMENTE esta aba APÓS a confirmação.")
+        print(f"=========================================================================")
 
-        # --- PASSO 5: LIMPEZA AUTOMÁTICA DA ABA DE ORIGEM (GOVERNANÇA) ---
-        if len(dados_para_copiar) > 0:
-            # Limpa da Linha 2 em diante. Assumindo que 1000 linhas são suficientes para o mês.
-            # O len(dados_do_mes) garante que limpamos apenas até onde há dados.
-            range_to_clear = f'A2:Z{len(dados_do_mes)}'
-            planilha_origem.batch_clear([range_to_clear])
-            print(f"Aba de Origem '{aba_origem_name}' limpa com sucesso (mantendo apenas o cabeçalho).")
+        # O código de limpeza (batch_clear) foi REMOVIDO daqui.
 
     except gspread.exceptions.WorksheetNotFound as e:
         print(f"ERRO: A aba '{aba_origem_name}' ou '{aba_historico_name}' não foi encontrada.")
