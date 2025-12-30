@@ -1,17 +1,16 @@
 import gspread
 import os 
 import json 
-from datetime import datetime
 import sys
+from datetime import datetime
 
-# --- CONFIGURAÇÕES DAS PLANILHAS (Definição do Ambiente) ---
+# --- CONFIGURAÇÕES DAS PLANILHAS ---
 
-# IDs das planilhas (APENAS o ID, sem a URL completa)
-PLANILHA_ORIGEM_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"  # Vendas e Gastos (Origem)
+# IDs das planilhas (APENAS o ID)
+PLANILHA_ORIGEM_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"  # Vendas e Gastos (Origem do mês)
 PLANILHA_HISTORICO_ID = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y" # HISTORICO DE VENDAS E GASTOS (Destino)
 
-# Mapeamento das Abas: {ABA_ORIGEM: ABA_DESTINO}
-# Origem (minúscula) -> Destino (MAIÚSCULA), conforme sua regra.
+# Mapeamento das Abas: {ABA_ORIGEM (minúscula): ABA_DESTINO (MAIÚSCULA)}
 MAP_ABAS = {
     "vendas": "VENDAS",
     "gastos": "GASTOS"
@@ -20,18 +19,13 @@ MAP_ABAS = {
 
 
 def autenticar_gspread():
-    """
-    Autentica o gspread usando a variável de ambiente GSPREAD_SERVICE_ACCOUNT_CREDENTIALS.
-    Este método é crucial para a segurança (governança de credenciais).
-    """
+    """Autentica o gspread usando a variável de ambiente."""
     credenciais_json_string = os.environ.get('GSPREAD_SERVICE_ACCOUNT_CREDENTIALS')
 
     if not credenciais_json_string:
-        # Se não encontrar a credencial, é uma falha de segurança/configuração.
-        raise Exception("Variável de ambiente GSPREAD_SERVICE_ACCOUNT_CREDENTIALS não encontrada! Verifique o Secret no GitHub.")
+        raise Exception("Variável de ambiente GSPREAD_SERVICE_ACCOUNT_CREDENTIALS não encontrada!")
 
     try:
-        # Carrega o JSON das credenciais e autentica.
         credenciais_dict = json.loads(credenciais_json_string)
         return gspread.service_account_from_dict(credenciais_dict)
     except Exception as e:
@@ -40,14 +34,13 @@ def autenticar_gspread():
 
 def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name, aba_historico_name):
     """
-    Função modularizada para realizar o backup de uma aba para a aba histórica.
+    Função modularizada que copia e, APÓS O SUCESSO, limpa a aba de origem.
     """
     print(f"\n--- Iniciando Backup: {aba_origem_name.upper()} para {aba_historico_name} ---")
     
     try:
         # 1. Abre a aba de origem e pega todos os dados
         planilha_origem = gc.open_by_key(planilha_origem_id).worksheet(aba_origem_name)
-        # Pega todos os valores (inclui o cabeçalho)
         dados_do_mes = planilha_origem.get_all_values()
         
         # 2. Verifica se há dados novos (dados_do_mes[1:] exclui o cabeçalho)
@@ -60,15 +53,21 @@ def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name,
         # 3. Abre a aba de destino (Histórico)
         planilha_historico = gc.open_by_key(planilha_historico_id).worksheet(aba_historico_name)
         
-        # 4. Apêndice: Insere os dados na última linha vazia.
-        # USER_ENTERED é vital para preservar formatos como datas e moedas.
+        # 4. Apêndice: Insere os dados no Histórico.
         planilha_historico.append_rows(dados_para_copiar, value_input_option='USER_ENTERED')
         
-        print(f"Backup de {len(dados_para_copiar)} linhas concluído com sucesso e consolidado na aba '{aba_historico_name}'.")
+        print(f"Backup de {len(dados_para_copiar)} linhas concluído e consolidado na aba '{aba_historico_name}'.")
+
+        # --- PASSO 5: LIMPEZA AUTOMÁTICA DA ABA DE ORIGEM (GOVERNANÇA) ---
+        if len(dados_para_copiar) > 0:
+            # Limpa da Linha 2 em diante. Assumindo que 1000 linhas são suficientes para o mês.
+            # O len(dados_do_mes) garante que limpamos apenas até onde há dados.
+            range_to_clear = f'A2:Z{len(dados_do_mes)}'
+            planilha_origem.batch_clear([range_to_clear])
+            print(f"Aba de Origem '{aba_origem_name}' limpa com sucesso (mantendo apenas o cabeçalho).")
 
     except gspread.exceptions.WorksheetNotFound as e:
         print(f"ERRO: A aba '{aba_origem_name}' ou '{aba_historico_name}' não foi encontrada.")
-        # Levantar exceção para que o GitHub Actions marque a execução como falha.
         raise RuntimeError(f"Falha na validação da Planilha: {e}") 
     except Exception as e:
         print(f"ERRO GRAVE durante o backup de {aba_origem_name}: {e}")
@@ -78,21 +77,16 @@ def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name,
 def main():
     """Função principal para orquestrar a execução e controlar a governança de tempo."""
     
-    # Verifica se a variável de ambiente de forçar execução manual está presente.
-    # Ela será 'true' apenas em acionamentos manuais via GitHub Actions.
-    # Usamos .lower() pois inputs de GH Actions podem vir como string 'True'.
+    # Verifica se a execução foi forçada manualmente
     FORCA_EXECUCAO = os.environ.get('FORCA_EXECUCAO_MANUAL', 'false').lower() == 'true'
-    
     hoje = datetime.now().day
     
     # -------------------------------------------------------------
-    # Controle de Execução (O Agente só executa se for dia 1/16 OU se for forçado)
+    # Controle de Execução: Apenas no dia 1 (OU se for forçado)
     # -------------------------------------------------------------
     
-    if hoje not in [1, 16] and not FORCA_EXECUCAO:
-        # Se não é dia de backup E não foi forçado, encerra elegantemente.
-        print(f"Hoje é dia {hoje}. O Agente de Backup está dormindo (aguardando o dia 1 ou 16 do mês).")
-        # sys.exit(0) é usado para encerrar o script sem erro (exit code 0).
+    if hoje != 1 and not FORCA_EXECUCAO:
+        print(f"Hoje é dia {hoje}. O Agente de Backup está dormindo (aguardando o dia 1 do mês).")
         sys.exit(0) 
 
     # Mensagem de Log
@@ -115,6 +109,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as final_e:
-        print(f"\n### FALHA CRÍTICA DO AGENTE ###\nFalha ao executar a rotina. Verifique as credenciais ou os IDs/Nomes das abas.")
-        # Retorna um código de erro para o GitHub Actions
+        print(f"\n### FALHA CRÍTICA DO AGENTE ###\n{final_e}")
         sys.exit(1)
