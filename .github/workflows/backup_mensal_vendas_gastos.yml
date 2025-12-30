@@ -1,7 +1,7 @@
 name: BACKUP DE VENDAS E GASTOS
 
 on:
-  # 1. Gatilho Manual (Adicionamos um input opcional)
+  # 1. Gatilho Manual: Permite que você clique em "Run workflow" e force a execução.
   workflow_dispatch:
     inputs:
       force_run:
@@ -10,24 +10,36 @@ on:
         default: 'false'
         type: boolean
 
-  # 2. Gatilhos Agendados (Inalterados, continuam nos dias 1 e 16)
+  # 2. Gatilhos Agendados: Agora às 02:00 AM no Brasil (05:00 UTC).
   schedule:
-    - cron: '1 0 1 * *' 
-    - cron: '1 0 16 * *'
+    # Roda no dia 1 de cada mês, às 02:00 AM BRT (05:00 UTC).
+    - cron: '0 5 1 * *'
+    # Roda no dia 16 de cada mês, às 02:00 AM BRT (05:00 UTC).
+    - cron: '0 5 16 * *'
 
 jobs:
   run_consolidation:
     runs-on: ubuntu-latest
     steps:
-      # ... (Steps 1, 2 e 3 permanecem inalterados) ...
-      
+      - name: 1. Checkout do Repositório (Baixa o código)
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 3. Instalar Dependências (gspread)
+        run: |
+          python -m pip install --upgrade pip
+          pip install gspread
+
       - name: 4. Executar o Script do Agente de Backup
+        # Certifique-se de que este nome de arquivo está correto no seu repositório.
         run: python backup_gastos_despesas_mensal.py
         env:
-          # Mapeamento do Secret (Inalterado)
+          # Secret: Credenciais de Serviço do Google Cloud
           GSPREAD_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
           
-          # NOVO: Definir a variável de Forçar Execução Manual
-          # Esta variável só será 'true' se o workflow_dispatch for usado E o input 'force_run' for marcado/true.
-          # Se vier do schedule, este input não existe, e a variável será indefinida (false/vazia).
+          # NOVO: Variável para Forçar a Execução (Usado pelo script Python)
           FORCA_EXECUCAO_MANUAL: ${{ github.event.inputs.force_run }}
