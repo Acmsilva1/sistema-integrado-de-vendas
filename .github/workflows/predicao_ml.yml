@@ -1,15 +1,15 @@
 name: Gerar Previsão de Vendas (Machine Learning) 🔮
 
 on:
-  # 1. ATIVAÇÃO MANUAL
+  # 1. ATIVAÇÃO MANUAL (Para testes e validação sob demanda)
   workflow_dispatch:
     inputs:
       motivo:
-        description: 'Motivo da execução manual (e.g., Teste SARIMA, Validação de Dados)'
+        description: 'Motivo da execução manual (e.g., Baseline Naive, Validação de Dados)'
         required: false
-        default: 'Ativação manual para análise de qualidade de IA.'
+        default: 'Ativação manual para Modelo Naive.'
   
-  # 2. ATIVAÇÃO AGENDADA 
+  # 2. ATIVAÇÃO AGENDADA (Roda no dia 1 de cada mês)
   schedule:
     - cron: '0 6 1 * *' 
 
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write 
+      contents: write # Permite que o bot comite o novo dashboard
 
     steps:
       - name: Checkout do Repositório
@@ -29,12 +29,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (SARIMA, GSpread e MAE)
+      - name: Instalar Dependências (NAIVE BASELINE)
         run: |
-          # pandas e gspread (dados)
-          # statsmodels (para ARIMA/SARIMA)
-          # scikit-learn (para o cálculo do mean_absolute_error)
-          pip install pandas gspread statsmodels scikit-learn 
+          # Apenas o essencial: pandas (dados), gspread (planilha) e scikit-learn (cálculo do MAE)
+          pip install pandas gspread scikit-learn 
 
       - name: Executar o Modelo de Previsão
         env:
@@ -43,8 +41,9 @@ jobs:
           python predicao_ml.py
 
       - name: Commit e Push do Dashboard de ML
+        # Mensagem atualizada para refletir o Modelo Naive
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo SARIMA)"
+          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo NAIVE Baseline)"
           commit_body: "Motivo da Execução: ${{ github.event.inputs.motivo || 'Execução agendada/padrão.' }}"
           file_pattern: dashboard_ml_insights.html
