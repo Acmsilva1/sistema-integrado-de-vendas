@@ -29,9 +29,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (Incluindo Scikit-Learn para ML)
+      - name: Instalar Dependências (NOVO: Agora com Statsmodels para ARIMA)
         run: |
-          pip install pandas gspread scikit-learn
+          # A instalação anterior estava incorreta. 
+          # Instalamos apenas os pacotes necessários: pandas, gspread e statsmodels.
+          pip install pandas gspread statsmodels 
 
       - name: Executar o Modelo de Previsão
         env:
@@ -42,5 +44,5 @@ jobs:
       - name: Commit e Push do Dashboard de ML
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Atualização automática do Dashboard de Previsão ML"
+          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo ARIMA)"
           file_pattern: dashboard_ml_insights.html
