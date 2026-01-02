@@ -1,15 +1,15 @@
 name: Gerar Previsão de Vendas (Machine Learning) 🔮
 
 on:
-  # 1. ATIVAÇÃO MANUAL (Este é o botão "Run workflow" na aba Actions do GitHub)
+  # 1. ATIVAÇÃO MANUAL
   workflow_dispatch:
     inputs:
       motivo:
-        description: 'Motivo da execução manual (e.g., Teste ARIMA, Validação de Dados)'
+        description: 'Motivo da execução manual (e.g., Teste SARIMA, Validação de Dados)'
         required: false
         default: 'Ativação manual para análise de qualidade de IA.'
   
-  # 2. ATIVAÇÃO AGENDADA (Roda no dia 1 de cada mês)
+  # 2. ATIVAÇÃO AGENDADA 
   schedule:
     - cron: '0 6 1 * *' 
 
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write # Permite que o bot comite o novo dashboard
+      contents: write 
 
     steps:
       - name: Checkout do Repositório
@@ -29,10 +29,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (ARIMA, GSpread e MAE)
+      - name: Instalar Dependências (SARIMA, GSpread e MAE)
         run: |
-          # Instala os pacotes necessários:
-          # statsmodels (para o ARIMA)
+          # pandas e gspread (dados)
+          # statsmodels (para ARIMA/SARIMA)
           # scikit-learn (para o cálculo do mean_absolute_error)
           pip install pandas gspread statsmodels scikit-learn 
 
@@ -45,6 +45,6 @@ jobs:
       - name: Commit e Push do Dashboard de ML
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo ARIMA)"
+          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo SARIMA)"
           commit_body: "Motivo da Execução: ${{ github.event.inputs.motivo || 'Execução agendada/padrão.' }}"
           file_pattern: dashboard_ml_insights.html
