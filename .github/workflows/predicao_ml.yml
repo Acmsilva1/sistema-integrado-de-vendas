@@ -29,10 +29,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (Com Statsmodels para ARIMA)
+      - name: Instalar Dependências (AGORA SIM: ARIMA + MAE)
         run: |
-          # Instala os pacotes necessários para pandas, gspread e o modelo ARIMA.
-          pip install pandas gspread statsmodels 
+          # Instalamos pandas, gspread, statsmodels (para ARIMA) e scikit-learn (para o cálculo do MAE)
+          pip install pandas gspread statsmodels scikit-learn 
 
       - name: Executar o Modelo de Previsão
         env:
@@ -41,10 +41,8 @@ jobs:
           python predicao_ml.py
 
       - name: Commit e Push do Dashboard de ML
-        # O commit agora incluirá o motivo da execução manual (se houver) no corpo da mensagem.
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo ARIMA)"
-          # Adiciona o motivo da execução manual ao corpo do commit
           commit_body: "Motivo da Execução: ${{ github.event.inputs.motivo || 'Execução agendada/padrão.' }}"
           file_pattern: dashboard_ml_insights.html
