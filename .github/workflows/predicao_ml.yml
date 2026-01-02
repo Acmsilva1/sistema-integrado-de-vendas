@@ -3,7 +3,7 @@ name: Gerar Previsão de Vendas (Machine Learning) 🔮
 on:
   # Roda no dia 2 de cada mês (após o backup e a análise histórica)
   schedule:
-    - cron: '0 5 2 * *' 
+    - cron: '0 5 1 * *' 
   
   # Execução Manual
   workflow_dispatch:
