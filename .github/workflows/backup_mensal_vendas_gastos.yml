@@ -13,7 +13,7 @@ on:
   # 2. Gatilho Agendado: Apenas no dia 1, às 02:00 AM BRT (05:00 UTC).
   schedule:
     # Roda apenas no dia 1 de cada mês, às 05:00 UTC (02:00 AM BRT).
-    - cron: '0 4 1 * *' 
+    - cron: '0 2 1 * *' 
     
 jobs:
   run_consolidation:
