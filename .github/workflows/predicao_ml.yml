@@ -11,7 +11,7 @@ on:
   
   # 2. ATIVAÇÃO AGENDADA (Roda no dia 1 de cada mês)
   schedule:
-    - cron: '0 6 1 * *' 
+    - cron: '0 4 1 * *' 
 
 jobs:
   build_ml:
