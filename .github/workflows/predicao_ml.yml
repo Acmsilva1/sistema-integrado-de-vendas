@@ -29,21 +29,25 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (NAIVE BASELINE)
+      # <<<<< PASSO CORRIGIDO PARA INCLUIR TODAS AS DEPENDÊNCIAS >>>>>
+      - name: Instalar Dependências (ML + GEMINI)
         run: |
-          # Apenas o essencial: pandas (dados), gspread (planilha) e scikit-learn (cálculo do MAE)
-          pip install pandas gspread scikit-learn 
+          pip install --upgrade pip
+          pip install -r requirements.txt 
+      # <<<<< FIM DA CORREÇÃO >>>>>
 
-      - name: Executar o Modelo de Previsão
+      - name: Executar o Modelo de Previsão Sênior
         env:
           GCP_SA_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
+          # Não esqueça do Segredo do Gemini (Se já estiver no seu .yml, ótimo!)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
         run: |
           python predicao_ml.py
 
       - name: Commit e Push do Dashboard de ML
-        # Mensagem atualizada para refletir o Modelo Naive
+        # Mensagem atualizada para refletir a nova capacidade Sênior
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Atualização automática do Dashboard de Previsão ML (Modelo NAIVE Baseline)"
+          commit_message: "Atualização automática do Dashboard de Previsão ML/IA (Análise Sênior Gemini)"
           commit_body: "Motivo da Execução: ${{ github.event.inputs.motivo || 'Execução agendada/padrão.' }}"
           file_pattern: dashboard_ml_insights.html
