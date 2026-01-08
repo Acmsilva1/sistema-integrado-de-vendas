@@ -11,8 +11,8 @@ from sklearn.metrics import mean_absolute_error
 
 # --- NOVOS IMPORTS PARA O GEMINI (O CONSULTOR SÊNIOR) ---
 import textwrap 
-# IMPORTANTE: Instalar com 'pip install google-genai'
-from google import genai
+# IMPORTAÇÃO CORRIGIDA: Resolve o "ImportError: cannot import name 'genai' from 'google'"
+import google.genai as genai 
 from google.genai.errors import APIError
 # ------------------------------------------------------
 
@@ -40,8 +40,6 @@ def format_brl(value):
     """Função helper para formatar valores em R$"""
     value = float(value)
     return f"R$ {value:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
-
-# [ ... Mantém as funções: autenticar_gspread, carregar_dados_de_planilha, carregar_e_combinar_dados, treinar_e_prever ... ]
 
 def autenticar_gspread():
     SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
@@ -246,22 +244,21 @@ def gerar_insights_sarcasticos_gemini(previsao, mae, ultimo_valor_real, melhor_c
     Chama a API do Gemini para gerar uma análise Sênior, estratégica e sarcástica.
     NENHUM DADO SENSÍVEL (como DADOS DO COMPRADOR) é enviado.
     """
+    # Lendo o segredo do ambiente do GitHub Actions
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
     
     if not GEMINI_API_KEY:
-        # Retorna um erro amigável para o dashboard
         return (
             "⚠️ ERRO SÊNIOR: Variável 'GEMINI_API_KEY' não encontrada. "
             "Configure o Segredo no GitHub. A análise Sênior falhou."
         )
 
     try:
+        # Inicialização do cliente corrigida
         client = genai.Client(api_key=GEMINI_API_KEY)
         
         # Sanitização de Dados (Para não enviar DADOS DO COMPRADOR brutos para o Gemini)
-        # O melhor_comprador_atual tem o formato: "Nome (R$ X,XX)". Pegamos só o nome.
         comprador_nome = melhor_comprador_atual.split('(')[0].strip()
-        # O produto_mais_vendido_atual tem o formato: "Produto (R$ X,XX)". Pegamos só o nome.
         produto_nome = produto_mais_vendido_atual.split('(')[0].strip()
         
         # Criação do Prompt Sênior (Comportamento Sarcástico)
@@ -339,7 +336,7 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
         ultimo_valor_real, 
         melhor_comprador_atual, 
         produto_mais_vendido_atual, 
-        mae_status # Passa o status para o Gemini comentar a qualidade do modelo
+        mae_status 
     )
     # -----------------------------------------------------------
     
@@ -479,8 +476,7 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
     try:
-        # A chave GCP_SA_CREDENTIALS já está sendo lida de os.environ, 
-        # e a chave GEMINI_API_KEY será lida dentro de gerar_insights_sarcasticos_gemini
+        # A chave GCP_SA_CREDENTIALS já está sendo lida de os.environ
         gc = autenticar_gspread() 
         
         df_mensal, df_vendas_bruto = carregar_e_combinar_dados(gc) 
