@@ -2,3 +2,4 @@ gspread
 pandas
 numpy
 scikit-learn
+install google-genai
