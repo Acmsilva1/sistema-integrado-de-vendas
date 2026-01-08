@@ -7,8 +7,14 @@ import json
 from gspread.exceptions import WorksheetNotFound, APIError 
 
 # --- Adicionando as bibliotecas de Machine Learning ---
-# Removemos ARIMA/SARIMAX, mas mantemos o scikit-learn para o cálculo do MAE
 from sklearn.metrics import mean_absolute_error 
+
+# --- NOVOS IMPORTS PARA O GEMINI (O CONSULTOR SÊNIOR) ---
+import textwrap 
+# IMPORTANTE: Instalar com 'pip install google-genai'
+from google import genai
+from google.genai.errors import APIError
+# ------------------------------------------------------
 
 # --- CONFIGURAÇÕES DE DADOS E GOVERNANÇA (TOLERÂNCIA DE ERRO) ---
 ID_PLANILHA_UNICA = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y"
@@ -34,6 +40,8 @@ def format_brl(value):
     """Função helper para formatar valores em R$"""
     value = float(value)
     return f"R$ {value:,.2f}".replace('.', 'X').replace(',', '.').replace('X', ',')
+
+# [ ... Mantém as funções: autenticar_gspread, carregar_dados_de_planilha, carregar_e_combinar_dados, treinar_e_prever ... ]
 
 def autenticar_gspread():
     SHEET_CREDENTIALS_JSON = os.environ.get('GCP_SA_CREDENTIALS')
@@ -231,9 +239,69 @@ def gerar_html_balanco_grafico(df_dados, titulo_secao):
     """
     return html_final
 
+# --- INTEGRAÇÃO GEMINI (O CONSULTOR SÊNIOR) ---
+
+def gerar_insights_sarcasticos_gemini(previsao, mae, ultimo_valor_real, melhor_comprador_atual, produto_mais_vendido_atual, mae_status):
+    """
+    Chama a API do Gemini para gerar uma análise Sênior, estratégica e sarcástica.
+    NENHUM DADO SENSÍVEL (como DADOS DO COMPRADOR) é enviado.
+    """
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    
+    if not GEMINI_API_KEY:
+        # Retorna um erro amigável para o dashboard
+        return (
+            "⚠️ ERRO SÊNIOR: Variável 'GEMINI_API_KEY' não encontrada. "
+            "Configure o Segredo no GitHub. A análise Sênior falhou."
+        )
+
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Sanitização de Dados (Para não enviar DADOS DO COMPRADOR brutos para o Gemini)
+        # O melhor_comprador_atual tem o formato: "Nome (R$ X,XX)". Pegamos só o nome.
+        comprador_nome = melhor_comprador_atual.split('(')[0].strip()
+        # O produto_mais_vendido_atual tem o formato: "Produto (R$ X,XX)". Pegamos só o nome.
+        produto_nome = produto_mais_vendido_atual.split('(')[0].strip()
+        
+        # Criação do Prompt Sênior (Comportamento Sarcástico)
+        prompt = textwrap.dedent(f"""
+            Você é um Consultor de Data Science Sênior extremamente sarcástico e direto. 
+            Sua tarefa é analisar os seguintes dados de performance de vendas e lucro para o CEO e gerar um insight de alto nível.
+            
+            - Lucro Projetado Próximo Mês: R$ {previsao:,.2f}
+            - Lucro Mês Passado: R$ {ultimo_valor_real:,.2f}
+            - Erro do Modelo (MAE): R$ {mae:,.2f} ({mae_status.split(':')[0].replace('**', '')})
+            - Melhor Comprador (Nome Anônimo): {comprador_nome}
+            - Produto Top de Vendas: {produto_nome}
+            
+            Gere um único parágrafo de 4 a 5 frases que:
+            1. Comente o status do MAE com sarcasmo.
+            2. Analise a diferença entre o lucro projetado e o lucro passado.
+            3. Dê uma recomendação de ação imediata (e óbvia, mas que o CEO precisa ouvir) baseada no Melhor Comprador e Produto Top.
+            4. Use um tom de humor sarcástico, mas assertivo. Não enrole.
+            5. Use apenas os dados fornecidos.
+        """)
+        
+        # Chama a API
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        
+        return response.text
+
+    except APIError as e:
+        print(f"ERRO API GEMINI: {e}")
+        return f"❌ ERRO SÊNIOR: A API do Gemini falhou na chamada ({str(e)[:50]}...). Verifique sua chave ou cota."
+    except Exception as e:
+        print(f"ERRO INESPERADO: {e}")
+        return "❌ ERRO INESPERADO: Falha ao gerar o insight. O Sênior se retirou para um café."
+
+
 def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_comprador_atual, produto_mais_vendido_atual, melhor_comprador_ant, produto_mais_vendido_ant, ano_ant, ano_atual):
     
-    # Lógica de Insight da Previsão
+    # Lógica de Insight da Previsão (O Analista Pleno)
     diferenca = previsao - ultimo_valor_real
     if previsao < 0:
         insight = f"🚨 **Previsão de PREJUÍZO!** Lucro negativo de {format_brl(abs(previsao))} esperado. Hora de cortar o cafezinho."
@@ -263,6 +331,17 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
     else:
         mae_status = f"✅ **MAE ACEITÁVEL.** O erro médio está dentro da margem de {format_brl(limite_mae)}. Siga usando, mas monitore!"
         mae_cor = "#006400" 
+
+    # --- NOVO PONTO: CHAMADA AO GEMINI PARA INSIGHT SÊNIOR ---
+    insight_senior = gerar_insights_sarcasticos_gemini(
+        previsao, 
+        mae, 
+        ultimo_valor_real, 
+        melhor_comprador_atual, 
+        produto_mais_vendido_atual, 
+        mae_status # Passa o status para o Gemini comentar a qualidade do modelo
+    )
+    # -----------------------------------------------------------
     
     # --- GERAÇÃO DOS GRÁFICOS DE BALANÇO ---
     df_balanco_anterior = df_historico[df_historico['Mes_Ano'].dt.year == ano_ant].copy()
@@ -315,8 +394,15 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
             </div>
             
             <div class="info-box">
-                <h4>Insight da Previsão:</h4>
+                <h4>Insight da Previsão (O Analista Pleno - Lógica If/Else):</h4>
                 <p>{insight}</p>
+            </div>
+
+            <hr style="margin-top: 20px; border-color: #bb86fc;">
+
+            <div class="info-box" style="background-color: #3700b3; color: white; border: 1px solid #03dac6;">
+                <h3>🧠 Análise Sênior de IA (Powered by Gemini)</h3>
+                <p>{insight_senior}</p>
             </div>
 
             <div class="info-box" style="border: 1px dashed {mae_cor};">
@@ -393,7 +479,9 @@ def montar_dashboard_ml(previsao, mae, ultimo_valor_real, df_historico, melhor_c
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
     try:
-        gc = autenticar_gspread()
+        # A chave GCP_SA_CREDENTIALS já está sendo lida de os.environ, 
+        # e a chave GEMINI_API_KEY será lida dentro de gerar_insights_sarcasticos_gemini
+        gc = autenticar_gspread() 
         
         df_mensal, df_vendas_bruto = carregar_e_combinar_dados(gc) 
         
