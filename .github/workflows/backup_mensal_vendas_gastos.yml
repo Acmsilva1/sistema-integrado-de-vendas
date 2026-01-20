@@ -1,42 +1,39 @@
-name: BACKUP DE VENDAS E GASTOS
+name: BACKUP DIÁRIO DE VENDAS E GASTOS
 
 on:
-  # 1. Gatilho Manual: Permite que você clique em "Run workflow" e force a execução.
+  # 1. Gatilho Manual: Para quando você estiver ansioso e quiser rodar antes da hora.
   workflow_dispatch:
     inputs:
       force_run:
-        description: 'Forçar execução manual (ignora verificação de data 1)?'
+        description: 'Forçar execução manual?'
         required: false
-        default: 'false'
+        default: 'true' # Mudei para true, já que se você clicou, você quer que rode.
         type: boolean
 
-  # 2. Gatilho Agendado: Apenas no dia 1, às 02:00 AM BRT (05:00 UTC).
+  # 2. Gatilho Agendado: Todo santo dia, às 00:01 UTC.
   schedule:
-    # Roda apenas no dia 1 de cada mês, às 05:00 UTC (02:00 AM BRT).
-    - cron: '0 2 1 * *' 
+    # No cron: Minuto(1) Hora(0) Dia(*) Mês(*) Dia_da_Semana(*)
+    - cron: '1 0 * * *' 
     
 jobs:
   run_consolidation:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Checkout do Repositório (Baixa o código)
+      - name: 1. Checkout do Repositório
         uses: actions/checkout@v4
 
       - name: 2. Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.11' # Especificando uma versão estável, "3.x" é muito vago.
 
       - name: 3. Instalar Dependências (gspread)
         run: |
           python -m pip install --upgrade pip
-          pip install gspread
+          pip install gspread google-auth
 
-      - name: 4. Executar o Script do Agente de Backup
+      - name: 4. Executar o Script de Backup Diário
         run: python backup_gastos_despesas_mensal.py
         env:
-          # Secret: Credenciais de Serviço do Google Cloud
           GSPREAD_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
-          
-          # Variável para Forçar a Execução (Lê o input manual)
-          FORCA_EXECUCAO_MANUAL: ${{ github.event.inputs.force_run }}
+          FORCA_EXECUCAO_MANUAL: ${{ github.event.inputs.force_run || 'false' }}
