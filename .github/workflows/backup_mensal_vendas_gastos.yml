@@ -1,19 +1,19 @@
 name: BACKUP DIÁRIO DE VENDAS E GASTOS
 
 on:
-  # 1. Gatilho Manual: Para quando você estiver ansioso e quiser rodar antes da hora.
+  # Gatilho Manual: Útil para rodar agora e tirar o atraso dos 19 dias!
   workflow_dispatch:
     inputs:
       force_run:
         description: 'Forçar execução manual?'
         required: false
-        default: 'true' # Mudei para true, já que se você clicou, você quer que rode.
+        default: 'true'
         type: boolean
 
-  # 2. Gatilho Agendado: Todo santo dia, às 00:01 UTC.
+  # Gatilho Agendado: 00:01 Horário de Brasília
   schedule:
-    # No cron: Minuto(1) Hora(0) Dia(*) Mês(*) Dia_da_Semana(*)
-    - cron: '1 0 * * *' 
+    # 03:01 UTC = 00:01 Brasília (BRT)
+    - cron: '1 3 * * *' 
     
 jobs:
   run_consolidation:
@@ -25,14 +25,14 @@ jobs:
       - name: 2. Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Especificando uma versão estável, "3.x" é muito vago.
+          python-version: '3.11'
 
-      - name: 3. Instalar Dependências (gspread)
+      - name: 3. Instalar Dependências
         run: |
           python -m pip install --upgrade pip
           pip install gspread google-auth
 
-      - name: 4. Executar o Script de Backup Diário
+      - name: 4. Executar o Script de Backup Inteligente
         run: python backup_gastos_despesas_mensal.py
         env:
           GSPREAD_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
