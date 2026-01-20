@@ -4,108 +4,67 @@ import json
 import sys
 from datetime import datetime
 
-# --- CONFIGURAÇÕES DAS PLANILHAS ---
+# IDs das planilhas - Mantendo sua governança de variáveis
+PLANILHA_ORIGEM_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"
+PLANILHA_HISTORICO_ID = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y"
 
-# IDs das planilhas (APENAS o ID)
-PLANILHA_ORIGEM_ID = "1LuqYrfR8ry_MqCS93Mpj9_7Vu0i9RUTomJU2n69bEug"  # Vendas e Gastos (Origem do mês)
-PLANILHA_HISTORICO_ID = "1XWdRbHqY6DWOlSO-oJbBSyOsXmYhM_NEA2_yvWbfq2Y" # HISTORICO DE VENDAS E GASTOS (Destino)
-
-# Mapeamento das Abas: {ABA_ORIGEM (minúscula): ABA_DESTINO (MAIÚSCULA)}
 MAP_ABAS = {
     "vendas": "VENDAS",
     "gastos": "GASTOS"
 }
-# -----------------------------------------------------------
-
 
 def autenticar_gspread():
-    """Autentica o gspread usando a variável de ambiente."""
     credenciais_json_string = os.environ.get('GSPREAD_SERVICE_ACCOUNT_CREDENTIALS')
-
     if not credenciais_json_string:
         raise Exception("Variável de ambiente GSPREAD_SERVICE_ACCOUNT_CREDENTIALS não encontrada!")
+    
+    credenciais_dict = json.loads(credenciais_json_string)
+    return gspread.service_account_from_dict(credenciais_dict)
 
-    try:
-        credenciais_dict = json.loads(credenciais_json_string)
-        return gspread.service_account_from_dict(credenciais_dict)
-    except Exception as e:
-        raise Exception(f"Erro ao carregar ou autenticar credenciais JSON: {e}")
-
-
-def fazer_backup(gc, planilha_origem_id, planilha_historico_id, aba_origem_name, aba_historico_name):
-    """
-    Função modularizada que copia os dados. A LIMPEZA DA ORIGEM AGORA É MANUAL.
-    """
-    print(f"\n--- Iniciando Backup: {aba_origem_name.upper()} para {aba_historico_name} ---")
+def fazer_backup_inteligente(gc, p_origem_id, p_dest_id, aba_origem_name, aba_dest_name):
+    print(f"\n🔍 Verificando: {aba_origem_name.upper()}...")
     
     try:
-        # 1. Abre a aba de origem e pega todos os dados
-        planilha_origem = gc.open_by_key(planilha_origem_id).worksheet(aba_origem_name)
-        dados_do_mes = planilha_origem.get_all_values()
+        # Abre as abas
+        aba_origem = gc.open_by_key(p_origem_id).worksheet(aba_origem_name)
+        aba_dest = gc.open_by_key(p_dest_id).worksheet(aba_dest_name)
         
-        # 2. Verifica se há dados novos (dados_do_mes[1:] exclui o cabeçalho)
-        dados_para_copiar = dados_do_mes[1:] 
+        # Pega todos os valores (Cuidado com LGPD: não logar dados sensíveis aqui)
+        dados_origem = aba_origem.get_all_values()
+        dados_dest = aba_dest.get_all_values()
 
-        if not dados_para_copiar:
-            print(f"Não há novos dados na aba '{aba_origem_name}' para consolidar (apenas cabeçalho).")
+        if len(dados_origem) <= 1:
+            print(f"ℹ️ Aba '{aba_origem_name}' está vazia ou apenas com cabeçalho.")
             return
 
-        # 3. Abre a aba de destino (Histórico)
-        planilha_historico = gc.open_by_key(planilha_historico_id).worksheet(aba_historico_name)
-        
-        # 4. Apêndice: Insere os dados no Histórico.
-        planilha_historico.append_rows(dados_para_copiar, value_input_option='USER_ENTERED')
-        
-        print(f"Backup de {len(dados_para_copiar)} linhas concluído e consolidado na aba '{aba_historico_name}'.")
-        print(f"=========================================================================")
-        print(f"!!! ATENÇÃO !!!: A limpeza da aba de origem ('{aba_origem_name}') NÃO FOI FEITA.")
-        print(f"PARA EVITAR DUPLICAÇÃO NO PRÓXIMO MÊS, LIMPE MANUALMENTE esta aba APÓS a confirmação.")
-        print(f"=========================================================================")
+        # Criamos um set de strings para comparação rápida (Otimização de performance)
+        # Cada linha vira uma string única separada por vírgula
+        set_historico = set([",".join(map(str, linha)) for linha in dados_dest])
 
-        # O código de limpeza (batch_clear) foi REMOVIDO daqui.
+        novos_dados = []
+        for linha in dados_origem[1:]: # Ignora cabeçalho da origem
+            hash_linha = ",".join(map(str, linha))
+            if hash_linha not in set_historico:
+                novos_dados.append(linha)
 
-    except gspread.exceptions.WorksheetNotFound as e:
-        print(f"ERRO: A aba '{aba_origem_name}' ou '{aba_historico_name}' não foi encontrada.")
-        raise RuntimeError(f"Falha na validação da Planilha: {e}") 
+        if novos_dados:
+            aba_dest.append_rows(novos_dados, value_input_option='USER_ENTERED')
+            print(f"✅ {len(novos_dados)} novas linhas consolidadas em '{aba_dest_name}'.")
+        else:
+            print(f"😴 Nada novo em '{aba_origem_name}'. Tudo já está no backup.")
+
     except Exception as e:
-        print(f"ERRO GRAVE durante o backup de {aba_origem_name}: {e}")
-        raise
-
+        print(f"❌ Erro ao processar '{aba_origem_name}': {e}")
 
 def main():
-    """Função principal para orquestrar a execução e controlar a governança de tempo."""
+    # Removida a trava de 'dia 1' para permitir execução diária
+    print(f"📅 Execução Diária: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     
-    # Verifica se a execução foi forçada manualmente
-    FORCA_EXECUCAO = os.environ.get('FORCA_EXECUCAO_MANUAL', 'false').lower() == 'true'
-    hoje = datetime.now().day
-    
-    # -------------------------------------------------------------
-    # Controle de Execução: Apenas no dia 1 (OU se for forçado)
-    # -------------------------------------------------------------
-    
-    if hoje != 1 and not FORCA_EXECUCAO:
-        print(f"Hoje é dia {hoje}. O Agente de Backup está dormindo (aguardando o dia 1 do mês).")
-        sys.exit(0) 
-
-    # Mensagem de Log
-    if FORCA_EXECUCAO:
-         print("\n🚨 AGENTE DE BACKUP ATIVADO (MANUAL OVERRIDE) - Executando sob demanda...")
-    else:
-         print(f"\n🚀 AGENTE DE BACKUP ATIVADO - Executando no dia {hoje}...")
-    
-    # 1. Autentica UMA VEZ
     gc = autenticar_gspread()
-    
-    # 2. Executa a função de backup para Vendas e Gastos (duas passagens)
     for origem, destino in MAP_ABAS.items():
-        fazer_backup(gc, PLANILHA_ORIGEM_ID, PLANILHA_HISTORICO_ID, origem, destino)
+        fazer_backup_inteligente(gc, PLANILHA_ORIGEM_ID, PLANILHA_HISTORICO_ID, origem, destino)
         
-    print("\n✅ ORQUESTRAÇÃO DE BACKUP CONCLUÍDA.")
-
+    print("\n🏁 Processo de sincronização concluído.")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as final_e:
-        print(f"\n### FALHA CRÍTICA DO AGENTE ###\n{final_e}")
-        sys.exit(1)
+    main()
