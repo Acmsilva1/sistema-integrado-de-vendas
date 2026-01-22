@@ -1,7 +1,7 @@
-name: BACKUP DIÁRIO DE VENDAS E GASTOS
+name: BACKUP MENSAL CONSOLIDADO DE VENDAS E GASTOS
 
 on:
-  # Gatilho Manual: Útil para rodar agora e tirar o atraso dos 19 dias!
+  # Gatilho Manual: Mantido para você rodar quando quiser sem esperar o dia 01
   workflow_dispatch:
     inputs:
       force_run:
@@ -10,10 +10,11 @@ on:
         default: 'true'
         type: boolean
 
-  # Gatilho Agendado: 00:01 Horário de Brasília
+  # Gatilho Agendado: Roda apenas no DIA 01 de cada mês
   schedule:
-    # 03:01 UTC = 00:01 Brasília (BRT)
-    - cron: '1 3 * * *' 
+    # 03:01 UTC = 00:01 Horário de Brasília (BRT)
+    # Campos do cron: minuto | hora | dia do mês | mês | dia da semana
+    - cron: '1 3 1 * *' 
     
 jobs:
   run_consolidation:
