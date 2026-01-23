@@ -1,19 +1,16 @@
 name: BACKUP MENSAL CONSOLIDADO DE VENDAS E GASTOS
 
 on:
-  # Gatilho Manual: Mantido para você rodar quando quiser sem esperar o dia 01
   workflow_dispatch:
     inputs:
       force_run:
-        description: 'Forçar execução manual?'
+        description: 'Forçar execução manual fora do dia 01?'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
 
-  # Gatilho Agendado: Roda apenas no DIA 01 de cada mês
   schedule:
-    # 03:01 UTC = 00:01 Horário de Brasília (BRT)
-    # Campos do cron: minuto | hora | dia do mês | mês | dia da semana
+    # 03:01 UTC = 00:01 Horário de Brasília (BRT) no DIA 01
     - cron: '1 3 1 * *' 
     
 jobs:
@@ -33,8 +30,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install gspread google-auth
 
-      - name: 4. Executar o Script de Backup Inteligente
+      - name: 4. Executar o Script
         run: python backup_gastos_despesas_mensal.py
         env:
           GSPREAD_SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.GCP_SA_CREDENTIALS }}
+          # Passa a escolha do usuário para o Python
           FORCA_EXECUCAO_MANUAL: ${{ github.event.inputs.force_run || 'false' }}
